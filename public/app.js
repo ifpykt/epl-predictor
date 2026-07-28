@@ -14,9 +14,27 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+function brandMark() {
+  return `<svg class="brand-mark" viewBox="0 0 64 72" aria-hidden="true">
+    <path d="M32 2 58 12v20c0 17.8-10.7 29.5-26 38C16.7 61.5 6 49.8 6 32V12L32 2Z" fill="#0b3328"/>
+    <path d="M32 7.5 52.5 16v16.2c0 14.1-7.9 24.3-20.5 31.8C19.4 56.5 11.5 46.3 11.5 32.2V16L32 7.5Z" fill="#dff74e"/>
+    <path d="M15.5 18.7 32 11.9l16.5 6.8v13.5c0 11.6-6.2 20.2-16.5 26.8-10.3-6.6-16.5-15.2-16.5-26.8V18.7Z" fill="#12633f"/>
+    <circle cx="32" cy="28" r="11.2" fill="#fff"/>
+    <path d="m32 21.3 4.2 3-1.6 4.9h-5.2l-1.6-4.9 4.2-3Zm-9.7 3.7 5.5-.7m-7 6.2 4.7 3.2m2.2 5.2 1.7-5.1m6.9 5.1-1.7-5.1m8.6-3.3-4.7 3.2m3.2-8.7-5.5-.7" fill="none" stroke="#0b3328" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M19.5 44.5h25v9h-25z" rx="2" fill="#f6c453"/>
+    <text x="32" y="51.1" text-anchor="middle" font-size="6.8" font-weight="900" font-family="Arial, sans-serif" fill="#0b3328">1 · X · 2</text>
+  </svg>`;
+}
+
 function loginView(error = "") {
   app.innerHTML = `<main class="login">
-    <section class="login-visual"><span class="kicker">Сезон 2026/27</span><h1>АПЛ<br>Прогноз</h1><p>Закрытая лига прогнозов для вашей футбольной компании.</p></section>
+    <section class="login-visual">
+      <div class="login-brand">${brandMark()}<span>Футбольная лига прогнозов</span></div>
+      <span class="kicker">Сезон 2026/27 · Премьер-лига</span>
+      <h1>Лига лысых<br>шарлатанов</h1>
+      <p>Здесь футбольная интуиция встречается с холодным расчётом. Ставьте точный счёт, выбирайте матч ×2 и забирайте первое место.</p>
+      <div class="odds-strip" aria-hidden="true"><span>1</span><i></i><span>X</span><i></i><span>2</span><b>MAKE YOUR PICK</b></div>
+    </section>
     <section class="login-form"><form class="card" id="login"><h2>Вход в лигу</h2><p class="sub">Введите логин и пароль, выданные администратором.</p>
       <label class="field"><span>Логин</span><input name="login" autocomplete="username" required></label>
       <label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required></label>
@@ -45,9 +63,9 @@ function predictionFor(fixture) {
 function render() {
   const isAdmin = state.user.role === "admin";
   const participantPasswordForm = state.user.must_change_password && !isAdmin ? passwordView() : "";
-  app.innerHTML = `<header class="top"><div class="brand"><span class="ball">⚽</span><span>АПЛ Прогноз</span></div>
+  app.innerHTML = `<header class="top"><div class="brand">${brandMark()}<span class="brand-copy"><strong>Лига лысых шарлатанов</strong><small>Футбольные прогнозы</small></span></div>
     <div class="account"><small>${esc(state.user.display_name)} · ${isAdmin ? "Администратор" : "Участник"}</small><button class="link" id="logout">Выйти</button></div></header>
-    <section class="hero"><div><span class="kicker">Закрытая лига прогнозов</span><h1>Матчдэй ${round}</h1><p>Точный счёт — 5 · разница — 3 · исход — 2 · матч ×2</p></div>
+    <section class="hero"><div class="hero-copy"><span class="kicker">Премьер-лига · сезон 2026/27</span><div class="matchday"><span class="round-badge"><small>Тур</small><b>${round}</b></span><div><h1>Матчдэй ${round}</h1><p>Точный счёт — 5 · разница — 3 · исход — 2 · матч ×2</p></div></div></div>
       <nav class="tabs"><button data-tab="predictions" class="${tab === "predictions" ? "active" : ""}">Прогнозы</button><button data-tab="table" class="${tab === "table" ? "active" : ""}">Таблица</button>${isAdmin ? `<button data-tab="admin" class="${tab === "admin" ? "active" : ""}">Управление</button>` : ""}</nav></section>
     <main class="wrap">${state.user.must_change_password ? `<div class="notice">При первом входе смените временный пароль ${isAdmin ? "в разделе «Управление»" : "в форме ниже"}.</div>` : ""}${participantPasswordForm}${content()}</main>`;
   document.querySelector("#logout").onclick = async () => { await api("/api/logout", { method: "POST" }); loginView(); };
