@@ -112,13 +112,14 @@ function adminView() {
     api("/api/admin/dashboard").then((data) => { adminData = data; render(); }).catch((e) => alert(e.message));
     return `<section class="panel empty">Загружаем панель администратора…</section>`;
   }
-  const labels = { overview: "Обзор", fixtures: "Матчи", users: "Участники", rules: "Правила", log: "Журнал" };
+  const labels = { overview: "Обзор", predictions: "Прогнозы", fixtures: "Матчи", users: "Участники", rules: "Правила", log: "Журнал" };
   return `<div class="toolbar"><div><p class="eyebrow">Панель администратора</p><h2>Управление лигой</h2></div><button class="primary" id="sync">Обновить матчи</button></div>
     <nav class="admin-tabs">${Object.entries(labels).map(([key,label]) => `<button data-admin-tab="${key}" class="${adminTab === key ? "active" : ""}">${label}</button>`).join("")}</nav>
     ${adminContent()}`;
 }
 
 function adminContent() {
+  if (adminTab === "predictions") return predictionsAdminView();
   if (adminTab === "fixtures") return fixturesAdminView();
   if (adminTab === "users") return usersAdminView();
   if (adminTab === "rules") return rulesAdminView();
@@ -137,6 +138,29 @@ function adminContent() {
       <section class="panel side"><h3>Готовность к туру ${next?.round || "—"}</h3><div class="progress"><i style="width:${adminData.summary.active_players ? Math.round(submitted.length/adminData.summary.active_players*100) : 0}%"></i></div><p><b>${submitted.length} из ${adminData.summary.active_players}</b> участников заполнили хотя бы один прогноз на будущие матчи.</p>${missing.length ? `<p class="warning-text">Нет прогнозов: ${missing.map((u)=>esc(u.display_name)).join(", ")}</p>` : `<p class="success-text">Все участники начали заполнять прогнозы.</p>`}</section>
       <section class="panel side"><h3>Состояние системы</h3><div class="health-row"><span>База и приложение</span><b>Работают</b></div><div class="health-row"><span>Матчей в ближайшем туре</span><b>${inRound.length}</b></div><div class="health-row"><span>Последнее действие</span><b>${esc(adminData.logs[0]?.action || "—")}</b></div></section>
     </div>`;
+}
+
+function predictionsAdminView() {
+  const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a,b)=>a-b);
+  const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
+  const users = adminData.users.filter((u) => u.active);
+  const predictions = adminData.predictions || [];
+  return `<div class="toolbar compact"><div><h3>Прогнозы участников</h3><p class="sub admin-predictions-note">Доступны вам как независимому администратору. Для участников чужие прогнозы до начала матча остаются скрыты.</p></div>
+      <select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
+    <section class="prediction-admin-list">${fixtures.length ? fixtures.map((fixture) => {
+      const fixturePredictions = predictions.filter((prediction) => String(prediction.fixture_id) === String(fixture.id));
+      const byUser = new Map(fixturePredictions.map((prediction) => [String(prediction.user_id), prediction]));
+      const started = new Date(fixture.kickoff) <= new Date();
+      return `<article class="panel prediction-admin-card">
+        <header class="prediction-admin-head"><div><small>Тур ${fixture.round} · ${new Date(fixture.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small><h4>${esc(fixture.home_name)} — ${esc(fixture.away_name)}</h4></div>
+          <span class="prediction-count ${fixturePredictions.length === users.length && users.length ? "complete" : ""}">${fixturePredictions.length} из ${users.length}</span></header>
+        <div class="prediction-admin-grid">${users.length ? users.map((user) => {
+          const prediction = byUser.get(String(user.id));
+          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(user.display_name)}</span>${prediction ? `<b>${prediction.home_score}:${prediction.away_score}${prediction.bonus ? `<em>×2</em>` : ""}</b>` : `<small>Нет прогноза</small>`}</div>`;
+        }).join("") : `<div class="empty">Активных участников пока нет.</div>`}</div>
+        <footer class="prediction-admin-status"><span class="${started ? "closed" : "open"}">${started ? "Матч начался" : "Приём открыт"}</span>${fixture.home_score === null || fixture.away_score === null ? "" : `<b>Результат ${fixture.home_score}:${fixture.away_score}</b>`}</footer>
+      </article>`;
+    }).join("") : `<section class="panel empty">В этом туре нет матчей.</section>`}</section>`;
 }
 
 function fixturesAdminView() {
