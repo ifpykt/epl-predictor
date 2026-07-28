@@ -80,7 +80,7 @@ function content() {
   if (tab === "admin" && state.user.role === "admin") return adminView();
   const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a, b) => a - b);
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
-  return `<div class="toolbar"><h2>Ваш прогноз</h2><select class="round-select" id="round">${rounds.map((r) => `<option ${r === round ? "selected" : ""}>${r}</option>`).join("")}</select></div>
+  return `<div class="toolbar"><h2>Ваш прогноз</h2><select class="round-select" id="round">${rounds.map((r) => `<option ${r === round ? "selected" : ""}>Тур ${r}</option>`).join("")}</select></div>
     <div class="grid"><section class="panel">${fixtures.length ? fixtures.map(matchView).join("") : `<div class="empty">Календарь ещё не загружен. Администратору нужно нажать «Получить календарь».</div>`}</section>
     <aside class="panel side"><h3>Лидеры сезона</h3>${ranking()}</aside></div>`;
 }
