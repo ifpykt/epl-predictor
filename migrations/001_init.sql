@@ -47,14 +47,28 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS league_settings (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   season_name TEXT NOT NULL DEFAULT 'АПЛ 2026/27',
-  exact_points INTEGER NOT NULL DEFAULT 5 CHECK (exact_points BETWEEN 0 AND 20),
-  difference_points INTEGER NOT NULL DEFAULT 3 CHECK (difference_points BETWEEN 0 AND 20),
-  outcome_points INTEGER NOT NULL DEFAULT 2 CHECK (outcome_points BETWEEN 0 AND 20),
+  exact_points INTEGER NOT NULL DEFAULT 3 CHECK (exact_points BETWEEN 0 AND 20),
+  difference_points INTEGER NOT NULL DEFAULT 2 CHECK (difference_points BETWEEN 0 AND 20),
+  outcome_points INTEGER NOT NULL DEFAULT 1 CHECK (outcome_points BETWEEN 0 AND 20),
   joker_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   rules_text TEXT NOT NULL DEFAULT 'Прогноз можно менять до начала матча. После стартового свистка прогнозы открываются всем участникам.',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 INSERT INTO league_settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS app_migrations (
+  name TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+DO $
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM app_migrations WHERE name = 'scoring_3_2_1') THEN
+    UPDATE league_settings
+    SET exact_points = 3, difference_points = 2, outcome_points = 1, updated_at = NOW()
+    WHERE id = 1;
+    INSERT INTO app_migrations(name) VALUES ('scoring_3_2_1');
+  END IF;
+END $;
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,

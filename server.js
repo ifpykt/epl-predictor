@@ -47,7 +47,7 @@ function admin(req, res, next) {
   next();
 }
 
-function points(prediction, fixture, settings = { exact_points: 5, difference_points: 3, outcome_points: 2 }) {
+function points(prediction, fixture, settings = { exact_points: 3, difference_points: 2, outcome_points: 1 }) {
   if (fixture.home_score === null || fixture.away_score === null) return null;
   let value = 0;
   if (prediction.pred_home === fixture.home_score && prediction.pred_away === fixture.away_score) value = settings.exact_points;
