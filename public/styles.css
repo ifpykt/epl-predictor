@@ -618,7 +618,7 @@ select:focus-visible {
   .team { flex-direction: column; }
   .team.home { flex-direction: column-reverse; }
   .score input { width: 44px; height: 44px; }
-  .score small { display: none; }
+  .score small { display: block; margin-top: 3px; font-size: 8px; line-height: 1.15; text-align: center; }
   .hero { padding: 36px 14px 28px; }
   .hero::before { right: -180px; }
   .matchday { gap: 12px; }
