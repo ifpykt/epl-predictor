@@ -2,6 +2,8 @@ const app = document.querySelector("#app");
 let state = null;
 let round = 1;
 let tab = "predictions";
+let adminTab = "overview";
+let adminData = null;
 
 async function api(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
@@ -106,10 +108,68 @@ function passwordView() {
 }
 
 function adminView() {
-  return `<div class="toolbar"><h2>Управление лигой</h2><button class="primary" id="sync">Получить календарь и результаты</button></div>
-    <section class="panel"><form class="admin-form" id="new-user"><input name="displayName" placeholder="Имя участника" required><input name="login" placeholder="Логин латиницей" required><input name="temporaryPassword" placeholder="Временный пароль" required><button class="primary">Создать</button></form>
-    <div class="users">${state.users.map((u) => `<div class="user-row"><span><b>${esc(u.display_name)}</b> · ${esc(u.login)}</span>${u.role === "admin" ? "<small>Администратор</small>" : `<button class="link toggle-user" data-id="${u.id}" data-active="${u.active}">${u.active ? "Заблокировать" : "Активировать"}</button>`}</div>`).join("")}</div></section>
-    <section class="panel side" style="margin-top:20px"><h3>Смена моего пароля</h3><form id="password"><label class="field"><span>Новый пароль</span><input name="password" type="password" minlength="8" required></label><button class="primary">Сохранить</button></form></section>`;
+  if (!adminData) {
+    api("/api/admin/dashboard").then((data) => { adminData = data; render(); }).catch((e) => alert(e.message));
+    return `<section class="panel empty">Загружаем панель администратора…</section>`;
+  }
+  const labels = { overview: "Обзор", fixtures: "Матчи", users: "Участники", rules: "Правила", log: "Журнал" };
+  return `<div class="toolbar"><div><p class="eyebrow">Панель администратора</p><h2>Управление лигой</h2></div><button class="primary" id="sync">Обновить матчи</button></div>
+    <nav class="admin-tabs">${Object.entries(labels).map(([key,label]) => `<button data-admin-tab="${key}" class="${adminTab === key ? "active" : ""}">${label}</button>`).join("")}</nav>
+    ${adminContent()}`;
+}
+
+function adminContent() {
+  if (adminTab === "fixtures") return fixturesAdminView();
+  if (adminTab === "users") return usersAdminView();
+  if (adminTab === "rules") return rulesAdminView();
+  if (adminTab === "log") return logAdminView();
+  const next = state.fixtures.find((f) => new Date(f.kickoff) > new Date());
+  const inRound = state.fixtures.filter((f) => Number(f.round) === Number(next?.round));
+  const submitted = adminData.users.filter((u) => Number(u.upcoming_predictions) > 0);
+  const missing = adminData.users.filter((u) => u.active && !Number(u.upcoming_predictions));
+  return `<div class="stat-grid">
+      <article class="stat"><small>Матчей в календаре</small><b>${adminData.summary.fixtures}</b><span>${adminData.summary.pending_results} без результата</span></article>
+      <article class="stat"><small>Активных участников</small><b>${adminData.summary.active_players}</b><span>${submitted.length} уже ставили на будущие матчи</span></article>
+      <article class="stat"><small>Ближайший матч</small><b class="stat-date">${next ? new Date(next.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) : "—"}</b><span>${next ? `${esc(next.home_name)} — ${esc(next.away_name)}` : "Календарь завершён"}</span></article>
+      <article class="stat"><small>Последняя синхронизация</small><b class="stat-date">${adminData.summary.last_sync ? new Date(adminData.summary.last_sync).toLocaleString("ru-RU") : "—"}</b><span>Источник: football-data.org</span></article>
+    </div>
+    <div class="admin-grid">
+      <section class="panel side"><h3>Готовность к туру ${next?.round || "—"}</h3><div class="progress"><i style="width:${adminData.summary.active_players ? Math.round(submitted.length/adminData.summary.active_players*100) : 0}%"></i></div><p><b>${submitted.length} из ${adminData.summary.active_players}</b> участников заполнили хотя бы один прогноз на будущие матчи.</p>${missing.length ? `<p class="warning-text">Нет прогнозов: ${missing.map((u)=>esc(u.display_name)).join(", ")}</p>` : `<p class="success-text">Все участники начали заполнять прогнозы.</p>`}</section>
+      <section class="panel side"><h3>Состояние системы</h3><div class="health-row"><span>База и приложение</span><b>Работают</b></div><div class="health-row"><span>Матчей в ближайшем туре</span><b>${inRound.length}</b></div><div class="health-row"><span>Последнее действие</span><b>${esc(adminData.logs[0]?.action || "—")}</b></div></section>
+    </div>`;
+}
+
+function fixturesAdminView() {
+  const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a,b)=>a-b);
+  const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
+  return `<div class="toolbar compact"><h3>Матчи сезона</h3><select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
+    <section class="panel admin-list">${fixtures.map((f)=>`<form class="fixture-row" data-fixture-form="${f.id}">
+      <div class="fixture-name"><small>${esc(f.status)}</small><b>${esc(f.home_name)} — ${esc(f.away_name)}</b></div>
+      <input name="kickoff" type="datetime-local" value="${new Date(new Date(f.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}">
+      <select name="status">${["SCHEDULED","TIMED","IN_PLAY","FINISHED","POSTPONED","CANCELLED"].map((s)=>`<option ${s===f.status?"selected":""}>${s}</option>`).join("")}</select>
+      <div class="result-input"><input name="homeScore" type="number" min="0" max="30" value="${f.home_score ?? ""}"><b>:</b><input name="awayScore" type="number" min="0" max="30" value="${f.away_score ?? ""}"></div>
+      <input name="reason" placeholder="Причина изменения" minlength="5"><button class="secondary">Сохранить</button>
+    </form>`).join("")}</section>`;
+}
+
+function usersAdminView() {
+  return `<section class="panel"><form class="admin-form" id="new-user"><input name="displayName" placeholder="Имя участника" required><input name="login" placeholder="Логин латиницей" required><input name="temporaryPassword" type="password" minlength="8" placeholder="Временный пароль (8+)" required><button class="primary">Создать</button></form>
+    <div class="users">${adminData.users.map((u)=>`<div class="user-row detailed"><span><b>${esc(u.display_name)}</b><small>@${esc(u.login)} · ${u.predictions} прогнозов · ${u.last_login_at ? `был ${new Date(u.last_login_at).toLocaleDateString("ru-RU")}` : "ещё не входил"}</small></span><span class="user-actions">${u.must_change_password ? `<em>Временный пароль</em>` : ""}<button class="link reset-password" data-id="${u.id}">Сбросить пароль</button><button class="link toggle-user" data-id="${u.id}" data-active="${u.active}">${u.active ? "Архивировать" : "Активировать"}</button></span></div>`).join("")}</div></section>
+    <section class="panel side password-card"><h3>Смена моего пароля</h3><form id="password"><label class="field"><span>Новый пароль</span><input name="password" type="password" minlength="8" required></label><button class="primary">Сохранить</button></form></section>`;
+}
+
+function rulesAdminView() {
+  const s=adminData.settings;
+  return `<form class="panel settings-form" id="rules-form"><div><p class="eyebrow">Сезон и начисление</p><h3>Правила лиги</h3><p class="sub">Изменение очков после старта требует отдельного подтверждения и фиксируется в журнале.</p></div>
+    <label class="field"><span>Название сезона</span><input name="seasonName" value="${esc(s.season_name)}" required></label>
+    <div class="points-grid"><label class="field"><span>Точный счёт</span><input name="exactPoints" type="number" min="0" max="20" value="${s.exact_points}"></label><label class="field"><span>Разница мячей</span><input name="differencePoints" type="number" min="0" max="20" value="${s.difference_points}"></label><label class="field"><span>Исход</span><input name="outcomePoints" type="number" min="0" max="20" value="${s.outcome_points}"></label></div>
+    <label class="check"><input name="jokerEnabled" type="checkbox" ${s.joker_enabled?"checked":""}><span>Разрешить один матч ×2 в каждом туре</span></label>
+    <label class="field"><span>Текст правил для участников</span><textarea name="rulesText" rows="6">${esc(s.rules_text)}</textarea></label>
+    <label class="check danger-check"><input name="confirmRecalculate" type="checkbox"><span>Подтверждаю пересчёт сезона, если матчи уже начались</span></label><button class="primary">Сохранить правила</button></form>`;
+}
+
+function logAdminView() {
+  return `<section class="panel audit-list">${adminData.logs.length ? adminData.logs.map((x)=>`<article><time>${new Date(x.created_at).toLocaleString("ru-RU")}</time><div><b>${esc(x.action)}</b><span>${esc(x.actor_name)}${x.details?.reason ? ` · ${esc(x.details.reason)}` : ""}</span></div></article>`).join("") : `<div class="empty">Журнал пока пуст.</div>`}</section>`;
 }
 
 function bind() {
@@ -127,10 +187,15 @@ function bind() {
     row.querySelector(".bonus").onclick = async (event) => { document.querySelectorAll(".bonus").forEach((b) => b.classList.remove("on")); event.currentTarget.classList.add("on"); await save(); render(); };
   });
   const sync = document.querySelector("#sync");
-  if (sync) sync.onclick = async () => { sync.disabled = true; try { const r = await api("/api/admin/sync", { method: "POST" }); alert(`Обновлено матчей: ${r.updated}`); await load(); } catch (e) { alert(e.message); } finally { sync.disabled = false; } };
+  if (sync) sync.onclick = async () => { sync.disabled = true; try { const r = await api("/api/admin/sync", { method: "POST" }); alert(`Обновлено матчей: ${r.updated}`); adminData=null; await load(); } catch (e) { alert(e.message); } finally { sync.disabled = false; } };
+  document.querySelectorAll("[data-admin-tab]").forEach((button)=>button.onclick=()=>{adminTab=button.dataset.adminTab;render();});
   const newUser = document.querySelector("#new-user");
-  if (newUser) newUser.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(newUser))) }); await load(); tab = "admin"; render(); } catch (e) { alert(e.message); } };
-  document.querySelectorAll(".toggle-user").forEach((button) => button.onclick = async () => { await api(`/api/admin/users/${button.dataset.id}`, { method: "PATCH", body: JSON.stringify({ active: button.dataset.active !== "true" }) }); await load(); tab = "admin"; render(); });
+  if (newUser) newUser.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(newUser))) }); adminData=null; tab="admin";adminTab="users";await load(); } catch (e) { alert(e.message); } };
+  document.querySelectorAll(".toggle-user").forEach((button) => button.onclick = async () => { await api(`/api/admin/users/${button.dataset.id}`, { method: "PATCH", body: JSON.stringify({ active: button.dataset.active !== "true" }) }); adminData=null;tab="admin";adminTab="users";await load(); });
+  document.querySelectorAll(".reset-password").forEach((button)=>button.onclick=async()=>{const temporaryPassword=prompt("Новый временный пароль (минимум 8 символов)");if(!temporaryPassword)return;try{await api(`/api/admin/users/${button.dataset.id}/reset-password`,{method:"POST",body:JSON.stringify({temporaryPassword})});alert("Временный пароль установлен, активные сеансы завершены");adminData=null;tab="admin";adminTab="users";await load();}catch(e){alert(e.message);}});
+  document.querySelectorAll("[data-fixture-form]").forEach((form)=>form.onsubmit=async(event)=>{event.preventDefault();try{await api(`/api/admin/fixtures/${form.dataset.fixtureForm}`,{method:"PATCH",body:JSON.stringify(Object.fromEntries(new FormData(form)))});alert("Матч обновлён");adminData=null;tab="admin";adminTab="fixtures";await load();}catch(e){alert(e.message);}});
+  const rules=document.querySelector("#rules-form");
+  if(rules)rules.onsubmit=async(event)=>{event.preventDefault();const values=Object.fromEntries(new FormData(rules));values.jokerEnabled=rules.jokerEnabled.checked;values.confirmRecalculate=rules.confirmRecalculate.checked;try{await api("/api/admin/settings",{method:"PATCH",body:JSON.stringify(values)});alert("Правила сохранены");adminData=null;tab="admin";adminTab="rules";await load();}catch(e){alert(e.message);}};
   const password = document.querySelector("#password");
   if (password) password.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/change-password", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(password))) }); alert("Пароль изменён"); await load(); } catch (e) { alert(e.message); } };
 }
