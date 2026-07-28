@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'player' CHECK (role IN ('admin', 'player')),
   active BOOLEAN NOT NULL DEFAULT TRUE,
   must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+  last_login_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -42,8 +43,6 @@ CREATE TABLE IF NOT EXISTS predictions (
   PRIMARY KEY (user_id, fixture_id)
 );
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
-
 CREATE TABLE IF NOT EXISTS league_settings (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   season_name TEXT NOT NULL DEFAULT 'АПЛ 2026/27',
@@ -60,15 +59,19 @@ CREATE TABLE IF NOT EXISTS app_migrations (
   name TEXT PRIMARY KEY,
   applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-DO $
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM app_migrations WHERE name = 'scoring_3_2_1') THEN
-    UPDATE league_settings
-    SET exact_points = 3, difference_points = 2, outcome_points = 1, updated_at = NOW()
-    WHERE id = 1;
-    INSERT INTO app_migrations(name) VALUES ('scoring_3_2_1');
-  END IF;
-END $;
+WITH applied AS (
+  INSERT INTO app_migrations(name)
+  VALUES ('scoring_3_2_1')
+  ON CONFLICT(name) DO NOTHING
+  RETURNING name
+)
+UPDATE league_settings
+SET exact_points = 3,
+    difference_points = 2,
+    outcome_points = 1,
+    updated_at = NOW()
+WHERE id = 1
+  AND EXISTS (SELECT 1 FROM applied);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,
