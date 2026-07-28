@@ -67,7 +67,7 @@ function render() {
   const participantPasswordForm = state.user.must_change_password && !isAdmin ? passwordView() : "";
   app.innerHTML = `<header class="top"><div class="brand">${brandMark()}<span class="brand-copy"><strong>Лига лысых шарлатанов</strong><small>Футбольные прогнозы</small></span></div>
     <div class="account"><small>${esc(state.user.display_name)} · ${isAdmin ? "Администратор" : "Участник"}</small><button class="link" id="logout">Выйти</button></div></header>
-    <section class="hero"><div class="hero-copy"><span class="kicker">Премьер-лига · сезон 2026/27</span><div class="matchday"><span class="round-badge"><small>Тур</small><b>${round}</b></span><div><h1>Матчдэй ${round}</h1><p>Точный счёт — 5 · разница — 3 · исход — 2 · матч ×2</p></div></div></div>
+    <section class="hero"><div class="hero-copy"><span class="kicker">Премьер-лига · ${esc(state.settings?.season_name || "сезон 2026/27")}</span><div class="matchday"><span class="round-badge"><small>Тур</small><b>${round}</b></span><div><h1>Матчдэй ${round}</h1><p>Точный счёт — ${state.settings?.exact_points ?? 5} · разница — ${state.settings?.difference_points ?? 3} · исход — ${state.settings?.outcome_points ?? 2}${state.settings?.joker_enabled === false ? "" : " · матч ×2"}</p></div></div></div>
       <nav class="tabs"><button data-tab="predictions" class="${tab === "predictions" ? "active" : ""}">Прогнозы</button><button data-tab="table" class="${tab === "table" ? "active" : ""}">Таблица</button>${isAdmin ? `<button data-tab="admin" class="${tab === "admin" ? "active" : ""}">Управление</button>` : ""}</nav></section>
     <main class="wrap">${state.user.must_change_password ? `<div class="notice">При первом входе смените временный пароль ${isAdmin ? "в разделе «Управление»" : "в форме ниже"}.</div>` : ""}${participantPasswordForm}${content()}</main>`;
   document.querySelector("#logout").onclick = async () => { await api("/api/logout", { method: "POST" }); loginView(); };
@@ -92,7 +92,7 @@ function matchView(fixture) {
     <div class="team home"><span>${esc(fixture.home_name)}</span><img class="crest" src="${esc(fixture.home_crest)}" alt=""></div>
     <div class="score"><div><input data-side="home" type="number" min="0" max="30" value="${p?.home_score ?? ""}" ${locked ? "disabled" : ""}><small>${new Date(fixture.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small></div><b>:</b><input data-side="away" type="number" min="0" max="30" value="${p?.away_score ?? ""}" ${locked ? "disabled" : ""}></div>
     <div class="team"><img class="crest" src="${esc(fixture.away_crest)}" alt=""><span>${esc(fixture.away_name)}</span></div>
-    <button class="bonus ${p?.bonus ? "on" : ""}" ${locked ? "disabled" : ""}>×2</button></article>`;
+    <button class="bonus ${p?.bonus ? "on" : ""}" ${locked || state.settings?.joker_enabled === false ? "disabled" : ""} title="${state.settings?.joker_enabled === false ? "Матч ×2 отключён правилами" : "Удвоить очки за этот матч"}">×2</button></article>`;
 }
 
 function ranking() {
