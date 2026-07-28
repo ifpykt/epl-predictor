@@ -447,11 +447,15 @@ select:focus-visible {
 .crest { width: 36px; height: 36px; object-fit: contain; }
 
 .score {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  padding-bottom: 16px;
 }
+
+.score > div { display: contents; }
 
 .score input {
   width: 58px;
@@ -464,7 +468,18 @@ select:focus-visible {
 }
 
 .score input:focus { border-color: var(--field); }
-.score small { display: block; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.score small {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
 
 .bonus {
   padding: 10px 6px;
@@ -560,12 +575,15 @@ select:focus-visible {
 .user-row.detailed>span:first-child { display: grid; gap: 4px; }.user-row.detailed small { color: var(--muted); }.user-actions { display: flex; align-items: center; gap: 8px; }
 .user-actions em { padding: 5px 8px; border-radius: 99px; background: #fff8d8; color: #8a6500; font-size: 10px; font-style: normal; font-weight: 800; }
 .password-card { margin-top: 20px; }
-.settings-form { display: grid; gap: 12px; padding: 24px; }
+.settings-form { display: grid; min-width: 0; gap: 12px; padding: 24px; }
+.settings-form > * { min-width: 0; }
 .settings-form h3 { margin: 0; font-size: 26px; }.settings-form .sub { margin-bottom: 5px; }
-.points-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+.points-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .settings-form textarea { resize: vertical; font: inherit; }
-.check { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
-.check input { min-width: auto; }.danger-check { border-color: #efd0d5; background: #fff9fa; }
+.check { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.check input { width: auto; min-width: 0; flex: 0 0 auto; }
+.check span { min-width: 0; overflow-wrap: anywhere; }
+.danger-check { border-color: #efd0d5; background: #fff9fa; }
 .audit-list article { display: grid; grid-template-columns: 170px 1fr; gap: 20px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .audit-list article:last-child { border: 0; }.audit-list time { color: var(--muted); font-size: 12px; }.audit-list article div { display: grid; gap: 4px; }.audit-list span { color: var(--muted); font-size: 12px; }
 .admin-predictions-note { max-width: 680px; margin: 6px 0 0; font-size: 13px; }
@@ -618,7 +636,8 @@ select:focus-visible {
   .team { flex-direction: column; }
   .team.home { flex-direction: column-reverse; }
   .score input { width: 44px; height: 44px; }
-  .score small { display: block; margin-top: 3px; font-size: 8px; line-height: 1.15; text-align: center; }
+  .score { padding-bottom: 15px; }
+  .score small { font-size: 8px; line-height: 1.15; }
   .hero { padding: 36px 14px 28px; }
   .hero::before { right: -180px; }
   .matchday { gap: 12px; }
