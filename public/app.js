@@ -44,11 +44,12 @@ function predictionFor(fixture) {
 
 function render() {
   const isAdmin = state.user.role === "admin";
+  const participantPasswordForm = state.user.must_change_password && !isAdmin ? passwordView() : "";
   app.innerHTML = `<header class="top"><div class="brand"><span class="ball">⚽</span><span>АПЛ Прогноз</span></div>
     <div class="account"><small>${esc(state.user.display_name)} · ${isAdmin ? "Администратор" : "Участник"}</small><button class="link" id="logout">Выйти</button></div></header>
     <section class="hero"><div><span class="kicker">Закрытая лига прогнозов</span><h1>Матчдэй ${round}</h1><p>Точный счёт — 5 · разница — 3 · исход — 2 · матч ×2</p></div>
       <nav class="tabs"><button data-tab="predictions" class="${tab === "predictions" ? "active" : ""}">Прогнозы</button><button data-tab="table" class="${tab === "table" ? "active" : ""}">Таблица</button>${isAdmin ? `<button data-tab="admin" class="${tab === "admin" ? "active" : ""}">Управление</button>` : ""}</nav></section>
-    <main class="wrap">${state.user.must_change_password ? `<div class="notice">При первом входе смените временный пароль в разделе ${isAdmin ? "«Управление»" : "ниже"}.</div>` : ""}${content()}</main>`;
+    <main class="wrap">${state.user.must_change_password ? `<div class="notice">При первом входе смените временный пароль ${isAdmin ? "в разделе «Управление»" : "в форме ниже"}.</div>` : ""}${participantPasswordForm}${content()}</main>`;
   document.querySelector("#logout").onclick = async () => { await api("/api/logout", { method: "POST" }); loginView(); };
   document.querySelectorAll("[data-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.tab; render(); });
   bind();
@@ -80,6 +81,10 @@ function ranking() {
 
 function tableView() {
   return `<div class="toolbar"><h2>Общий зачёт</h2></div><section class="panel side">${ranking()}</section>`;
+}
+
+function passwordView() {
+  return `<section class="panel side" style="margin-bottom:20px"><h3>Смена временного пароля</h3><form id="password"><label class="field"><span>Новый пароль</span><input name="password" type="password" minlength="8" autocomplete="new-password" required></label><button class="primary">Сохранить</button></form></section>`;
 }
 
 function adminView() {
