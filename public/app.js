@@ -163,16 +163,26 @@ function predictionsAdminView() {
     }).join("") : `<section class="panel empty">В этом туре нет матчей.</section>`}</section>`;
 }
 
+const fixtureStatuses = {
+  SCHEDULED: "Запланирован",
+  TIMED: "Время подтверждено",
+  IN_PLAY: "Идёт",
+  FINISHED: "Завершён",
+  POSTPONED: "Перенесён",
+  CANCELLED: "Отменён"
+};
+
 function fixturesAdminView() {
   const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a,b)=>a-b);
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
-  return `<div class="toolbar compact"><h3>Матчи сезона</h3><select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
-    <section class="panel admin-list">${fixtures.map((f)=>`<form class="fixture-row" data-fixture-form="${f.id}">
-      <div class="fixture-name"><small>${esc(f.status)}</small><b>${esc(f.home_name)} — ${esc(f.away_name)}</b></div>
-      <input name="kickoff" type="datetime-local" value="${new Date(new Date(f.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}">
-      <select name="status">${["SCHEDULED","TIMED","IN_PLAY","FINISHED","POSTPONED","CANCELLED"].map((s)=>`<option ${s===f.status?"selected":""}>${s}</option>`).join("")}</select>
-      <div class="result-input"><input name="homeScore" type="number" min="0" max="30" value="${f.home_score ?? ""}"><b>:</b><input name="awayScore" type="number" min="0" max="30" value="${f.away_score ?? ""}"></div>
-      <input name="reason" placeholder="Причина изменения" minlength="5"><button class="secondary">Сохранить</button>
+  return `<div class="toolbar compact"><div><h3>Матчи сезона</h3><p class="sub fixture-help">Изменяйте данные только при переносе, отмене или ручном исправлении результата.</p></div><select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
+    <section class="admin-list fixture-list">${fixtures.map((f)=>`<form class="panel fixture-row" data-fixture-form="${f.id}">
+      <div class="fixture-name"><span class="fixture-status status-${esc(f.status.toLowerCase())}">${esc(fixtureStatuses[f.status] || f.status)}</span><b>${esc(f.home_name)} — ${esc(f.away_name)}</b></div>
+      <label class="fixture-field"><span>Дата и время</span><input name="kickoff" type="datetime-local" value="${new Date(new Date(f.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}"></label>
+      <label class="fixture-field"><span>Статус</span><select name="status">${Object.entries(fixtureStatuses).map(([value,label])=>`<option value="${value}" ${value===f.status?"selected":""}>${label}</option>`).join("")}</select></label>
+      <div class="fixture-field fixture-result" ${f.status === "FINISHED" ? "" : "hidden"}><span>Итоговый счёт</span><div class="result-input"><label><span>Хозяева</span><input name="homeScore" type="number" min="0" max="30" value="${f.home_score ?? ""}" placeholder="0"></label><b>:</b><label><span>Гости</span><input name="awayScore" type="number" min="0" max="30" value="${f.away_score ?? ""}" placeholder="0"></label></div></div>
+      <label class="fixture-field fixture-reason"><span>Причина изменения</span><input name="reason" placeholder="Например: матч перенесён на новую дату" minlength="5" required></label>
+      <button class="secondary fixture-save">Сохранить изменения</button>
     </form>`).join("")}</section>`;
 }
 
@@ -217,7 +227,19 @@ function bind() {
   if (newUser) newUser.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(newUser))) }); adminData=null; tab="admin";adminTab="users";await load(); } catch (e) { alert(e.message); } };
   document.querySelectorAll(".toggle-user").forEach((button) => button.onclick = async () => { await api(`/api/admin/users/${button.dataset.id}`, { method: "PATCH", body: JSON.stringify({ active: button.dataset.active !== "true" }) }); adminData=null;tab="admin";adminTab="users";await load(); });
   document.querySelectorAll(".reset-password").forEach((button)=>button.onclick=async()=>{const temporaryPassword=prompt("Новый временный пароль (минимум 8 символов)");if(!temporaryPassword)return;try{await api(`/api/admin/users/${button.dataset.id}/reset-password`,{method:"POST",body:JSON.stringify({temporaryPassword})});alert("Временный пароль установлен, активные сеансы завершены");adminData=null;tab="admin";adminTab="users";await load();}catch(e){alert(e.message);}});
-  document.querySelectorAll("[data-fixture-form]").forEach((form)=>form.onsubmit=async(event)=>{event.preventDefault();try{await api(`/api/admin/fixtures/${form.dataset.fixtureForm}`,{method:"PATCH",body:JSON.stringify(Object.fromEntries(new FormData(form)))});alert("Матч обновлён");adminData=null;tab="admin";adminTab="fixtures";await load();}catch(e){alert(e.message);}});
+  document.querySelectorAll("[data-fixture-form]").forEach((form) => {
+    const status = form.querySelector('[name="status"]');
+    const result = form.querySelector(".fixture-result");
+    status.onchange = () => { result.hidden = status.value !== "FINISHED"; };
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      try {
+        await api(`/api/admin/fixtures/${form.dataset.fixtureForm}`, { method: "PATCH", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+        alert("Матч обновлён");
+        adminData = null; tab = "admin"; adminTab = "fixtures"; await load();
+      } catch (e) { alert(e.message); }
+    };
+  });
   const rules=document.querySelector("#rules-form");
   if(rules)rules.onsubmit=async(event)=>{event.preventDefault();const values=Object.fromEntries(new FormData(rules));values.jokerEnabled=rules.jokerEnabled.checked;values.confirmRecalculate=rules.confirmRecalculate.checked;try{await api("/api/admin/settings",{method:"PATCH",body:JSON.stringify(values)});alert("Правила сохранены");adminData=null;tab="admin";adminTab="rules";await load();}catch(e){alert(e.message);}};
   const password = document.querySelector("#password");
