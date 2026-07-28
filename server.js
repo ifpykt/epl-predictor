@@ -188,7 +188,7 @@ app.post("/api/admin/users/:id/reset-password", auth, admin, async (req, res) =>
 });
 
 app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
-  const [summary, users, logs, settings] = await Promise.all([
+  const [summary, users, predictions, logs, settings] = await Promise.all([
     query(`SELECT
       (SELECT COUNT(*) FROM fixtures)::int fixtures,
       (SELECT COUNT(*) FROM fixtures WHERE home_score IS NULL OR away_score IS NULL)::int pending_results,
@@ -200,10 +200,20 @@ app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
       FROM users u LEFT JOIN predictions p ON p.user_id=u.id
       LEFT JOIN fixtures f ON f.id=p.fixture_id
       WHERE u.role='player' GROUP BY u.id ORDER BY u.display_name`),
+    query(`SELECT p.fixture_id,p.user_id,p.home_score,p.away_score,p.bonus,p.updated_at,u.display_name
+      FROM predictions p JOIN users u ON u.id=p.user_id
+      WHERE u.role='player' AND u.active=TRUE
+      ORDER BY p.fixture_id,u.display_name`),
     query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100"),
     query("SELECT * FROM league_settings WHERE id=1"),
   ]);
-  res.json({ summary: summary.rows[0], users: users.rows, logs: logs.rows, settings: settings.rows[0] });
+  res.json({
+    summary: summary.rows[0],
+    users: users.rows,
+    predictions: predictions.rows,
+    logs: logs.rows,
+    settings: settings.rows[0],
+  });
 });
 
 app.patch("/api/admin/fixtures/:id", auth, admin, async (req, res) => {
