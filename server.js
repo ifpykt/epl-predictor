@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
@@ -392,12 +393,51 @@ const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramAllowedIds = new Set(String(process.env.TELEGRAM_ALLOWED_IDS || "").split(",").map((x) => x.trim()).filter(Boolean));
 let telegramOffset = 0;
 
-async function telegram(method, body = {}) {
-  const response = await fetch(`https://api.telegram.org/bot${telegramToken}/${method}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+function telegramRequest(method, body = {}) {
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: "api.telegram.org",
+      port: 443,
+      path: `/bot${telegramToken}/${method}`,
+      method: "POST",
+      family: 4,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+      timeout: 35_000,
+    }, (response) => {
+      let responseBody = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { responseBody += chunk; });
+      response.on("end", () => {
+        let data;
+        try { data = JSON.parse(responseBody); }
+        catch { return reject(new Error(`Telegram ${method}: invalid JSON (${response.statusCode})`)); }
+        if (response.statusCode < 200 || response.statusCode >= 300 || !data.ok) {
+          return reject(new Error(`Telegram ${method}: ${response.statusCode} ${data.description || "request failed"}`));
+        }
+        resolve(data);
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error(`Telegram ${method}: timeout`)));
+    request.on("error", (error) => reject(new Error(`Telegram ${method}: ${error.code || error.message}`)));
+    request.end(payload);
   });
-  if (!response.ok) throw new Error(`Telegram ${method}: ${response.status}`);
-  return response.json();
+}
+
+async function telegram(method, body = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try { return await telegramRequest(method, body); }
+    catch (error) {
+      lastError = error;
+      if (/Telegram .*: 4\d\d/.test(error.message) || attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  throw lastError;
 }
 
 function telegramActor(message) {
