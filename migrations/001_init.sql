@@ -84,3 +84,49 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS dela_tasks (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','in_progress','control','done')),
+  priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal','high','critical')),
+  due_date TIMESTAMPTZ,
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dela_tasks_status_idx ON dela_tasks(status,due_date);
+
+CREATE TABLE IF NOT EXISTS dela_news (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  link TEXT,
+  author TEXT NOT NULL,
+  published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS dela_history (
+  id BIGSERIAL PRIMARY KEY,
+  actor_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dela_history_created_idx ON dela_history(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS dela_bot_drafts (
+  id UUID PRIMARY KEY,
+  telegram_user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('task','news')),
+  payload JSONB NOT NULL,
+  actor_name TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '1 day',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
