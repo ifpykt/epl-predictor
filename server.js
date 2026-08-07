@@ -12,6 +12,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === "production";
 const cookieName = "apl_session";
+const delaStatuses = new Set(["new", "in_progress", "control", "done"]);
+const delaPriorities = new Set(["normal", "high", "critical"]);
 
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -45,6 +47,36 @@ async function auth(req, res, next) {
 function admin(req, res, next) {
   if (req.user.role !== "admin") return res.status(403).json({ error: "Только для администратора" });
   next();
+}
+
+function canUseDela(user) {
+  const allowed = String(process.env.DELA_ALLOWED_LOGINS || "admin")
+    .split(",").map(cleanLogin).filter(Boolean);
+  return user.role === "admin" || allowed.includes(cleanLogin(user.login));
+}
+
+function delaAccess(req, res, next) {
+  if (!canUseDela(req.user)) return res.status(403).json({ error: "Нет доступа к разделу «Дела»" });
+  next();
+}
+
+async function delaAudit(actor, action, entityType, entityId, details = {}) {
+  await query(
+    `INSERT INTO dela_history(actor_name,action,entity_type,entity_id,details)
+     VALUES($1,$2,$3,$4,$5)`,
+    [actor, action, entityType, entityId == null ? null : String(entityId), JSON.stringify(details)],
+  );
+}
+
+function cleanTask(body) {
+  const title = String(body.title || "").trim();
+  const description = String(body.description || "").trim();
+  const status = delaStatuses.has(body.status) ? body.status : "new";
+  const priority = delaPriorities.has(body.priority) ? body.priority : "normal";
+  const dueDate = body.dueDate ? new Date(body.dueDate) : null;
+  if (!title || title.length > 180) throw Object.assign(new Error("Укажите название задачи"), { status: 400 });
+  if (dueDate && Number.isNaN(dueDate.getTime())) throw Object.assign(new Error("Проверьте срок"), { status: 400 });
+  return { title, description, status, priority, dueDate };
 }
 
 function points(prediction, fixture, settings = { exact_points: 3, difference_points: 2, outcome_points: 1 }) {
@@ -105,12 +137,88 @@ app.get("/api/state", auth, async (req, res) => {
   }
   res.json({
     user: req.user,
+    canUseDela: canUseDela(req.user),
     fixtures: fixtures.rows,
     predictions: predictions.rows,
     users: req.user.role === "admin" ? users.rows : [],
     settings: settings.rows[0],
     ranking: [...ranking].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
   });
+});
+
+app.get("/api/dela/state", auth, delaAccess, async (req, res) => {
+  const [tasks, news, history] = await Promise.all([
+    query("SELECT * FROM dela_tasks ORDER BY CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 ELSE 3 END,due_date NULLS LAST,created_at DESC"),
+    query("SELECT * FROM dela_news ORDER BY published_at DESC,created_at DESC LIMIT 100"),
+    query("SELECT * FROM dela_history ORDER BY created_at DESC LIMIT 100"),
+  ]);
+  res.json({ user: req.user, tasks: tasks.rows, news: news.rows, history: history.rows });
+});
+
+app.post("/api/dela/tasks", auth, delaAccess, async (req, res) => {
+  const item = cleanTask(req.body);
+  const { rows } = await query(
+    `INSERT INTO dela_tasks(title,description,status,priority,due_date,created_by,updated_by)
+     VALUES($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+    [item.title, item.description, item.status, item.priority, item.dueDate, req.user.display_name],
+  );
+  await delaAudit(req.user.display_name, "Создана задача", "task", rows[0].id, { title: item.title });
+  res.status(201).json(rows[0]);
+});
+
+app.patch("/api/dela/tasks/:id", auth, delaAccess, async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await query("SELECT * FROM dela_tasks WHERE id=$1", [id]);
+  if (!current.rows[0]) return res.status(404).json({ error: "Задача не найдена" });
+  const item = cleanTask({ ...current.rows[0], ...req.body, dueDate: req.body.dueDate === undefined ? current.rows[0].due_date : req.body.dueDate });
+  const { rows } = await query(
+    `UPDATE dela_tasks SET title=$1,description=$2,status=$3,priority=$4,due_date=$5,
+     updated_by=$6,updated_at=NOW() WHERE id=$7 RETURNING *`,
+    [item.title, item.description, item.status, item.priority, item.dueDate, req.user.display_name, id],
+  );
+  await delaAudit(req.user.display_name, "Изменена задача", "task", id, { title: item.title, status: item.status });
+  res.json(rows[0]);
+});
+
+app.delete("/api/dela/tasks/:id", auth, delaAccess, async (req, res) => {
+  const { rows } = await query("DELETE FROM dela_tasks WHERE id=$1 RETURNING title", [Number(req.params.id)]);
+  if (!rows[0]) return res.status(404).json({ error: "Задача не найдена" });
+  await delaAudit(req.user.display_name, "Удалена задача", "task", req.params.id, { title: rows[0].title });
+  res.json({ ok: true });
+});
+
+app.post("/api/dela/news", auth, delaAccess, async (req, res) => {
+  const title = String(req.body.title || "").trim();
+  const text = String(req.body.text || "").trim();
+  const link = String(req.body.link || "").trim() || null;
+  if (!title) return res.status(400).json({ error: "Укажите заголовок новости" });
+  const { rows } = await query(
+    `INSERT INTO dela_news(title,body,link,author) VALUES($1,$2,$3,$4) RETURNING *`,
+    [title, text, link, req.user.display_name],
+  );
+  await delaAudit(req.user.display_name, "Добавлена новость", "news", rows[0].id, { title });
+  res.status(201).json(rows[0]);
+});
+
+app.patch("/api/dela/news/:id", auth, delaAccess, async (req, res) => {
+  const title = String(req.body.title || "").trim();
+  const text = String(req.body.text || "").trim();
+  const link = String(req.body.link || "").trim() || null;
+  if (!title) return res.status(400).json({ error: "Укажите заголовок новости" });
+  const { rows } = await query(
+    `UPDATE dela_news SET title=$1,body=$2,link=$3 WHERE id=$4 RETURNING *`,
+    [title, text, link, Number(req.params.id)],
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Новость не найдена" });
+  await delaAudit(req.user.display_name, "Изменена новость", "news", rows[0].id, { title });
+  res.json(rows[0]);
+});
+
+app.delete("/api/dela/news/:id", auth, delaAccess, async (req, res) => {
+  const { rows } = await query("DELETE FROM dela_news WHERE id=$1 RETURNING title", [Number(req.params.id)]);
+  if (!rows[0]) return res.status(404).json({ error: "Новость не найдена" });
+  await delaAudit(req.user.display_name, "Удалена новость", "news", req.params.id, { title: rows[0].title });
+  res.json({ ok: true });
 });
 
 app.put("/api/predictions/:fixtureId", auth, async (req, res) => {
@@ -280,10 +388,99 @@ async function syncMatches() {
   return updated;
 }
 
+const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+const telegramAllowedIds = new Set(String(process.env.TELEGRAM_ALLOWED_IDS || "").split(",").map((x) => x.trim()).filter(Boolean));
+let telegramOffset = 0;
+
+async function telegram(method, body = {}) {
+  const response = await fetch(`https://api.telegram.org/bot${telegramToken}/${method}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Telegram ${method}: ${response.status}`);
+  return response.json();
+}
+
+function telegramActor(message) {
+  const user = message.from || {};
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || String(user.id);
+}
+
+async function handleTelegram(message) {
+  const chatId = message.chat?.id;
+  const senderId = String(message.from?.id || "");
+  if (!chatId || !telegramAllowedIds.has(senderId)) return;
+  const text = String(message.text || "").trim();
+  const actor = telegramActor(message);
+  if (text === "/start" || text === "/help") {
+    return telegram("sendMessage", { chat_id: chatId, text: "«Дела» подключены.\n\nОтправьте:\nЗадача: текст задачи\nНовость: заголовок | текст | ссылка\n\nКоманда /tasks покажет открытые задачи." });
+  }
+  if (text === "/tasks") {
+    const { rows } = await query("SELECT id,title,status,priority,due_date FROM dela_tasks WHERE status<>'done' ORDER BY due_date NULLS LAST,created_at DESC LIMIT 15");
+    const lines = rows.map((x) => `#${x.id} · ${x.title}${x.due_date ? ` · до ${new Date(x.due_date).toLocaleDateString("ru-RU")}` : ""}`);
+    return telegram("sendMessage", { chat_id: chatId, text: lines.length ? lines.join("\n") : "Открытых задач нет." });
+  }
+  if (/^задача\s*:/i.test(text)) {
+    const title = text.replace(/^задача\s*:/i, "").trim();
+    if (!title) return telegram("sendMessage", { chat_id: chatId, text: "После «Задача:» укажите текст." });
+    const draftId = crypto.randomUUID();
+    await query(`INSERT INTO dela_bot_drafts(id,telegram_user_id,chat_id,kind,payload,actor_name) VALUES($1,$2,$3,'task',$4,$5)`, [draftId, senderId, String(chatId), JSON.stringify({ title }), actor]);
+    return telegram("sendMessage", { chat_id: chatId, text: `Добавить задачу?\n\n${title}`, reply_markup: { inline_keyboard: [[{ text: "Добавить", callback_data: `confirm:${draftId}` }, { text: "Отмена", callback_data: `cancel:${draftId}` }]] } });
+  }
+  if (/^новость\s*:/i.test(text)) {
+    const parts = text.replace(/^новость\s*:/i, "").split("|").map((x) => x.trim());
+    if (!parts[0]) return telegram("sendMessage", { chat_id: chatId, text: "После «Новость:» укажите заголовок." });
+    const draftId = crypto.randomUUID();
+    const payload = { title: parts[0], body: parts[1] || "", link: parts[2] || null };
+    await query(`INSERT INTO dela_bot_drafts(id,telegram_user_id,chat_id,kind,payload,actor_name) VALUES($1,$2,$3,'news',$4,$5)`, [draftId, senderId, String(chatId), JSON.stringify(payload), actor]);
+    return telegram("sendMessage", { chat_id: chatId, text: `Добавить новость?\n\n${payload.title}${payload.body ? `\n${payload.body}` : ""}`, reply_markup: { inline_keyboard: [[{ text: "Добавить", callback_data: `confirm:${draftId}` }, { text: "Отмена", callback_data: `cancel:${draftId}` }]] } });
+  }
+  return telegram("sendMessage", { chat_id: chatId, text: "Не понял сообщение. Используйте «Задача: …», «Новость: …» или /tasks." });
+}
+
+async function handleTelegramCallback(callback) {
+  const senderId = String(callback.from?.id || "");
+  if (!telegramAllowedIds.has(senderId)) return;
+  const [action, draftId] = String(callback.data || "").split(":");
+  if (!draftId || !["confirm", "cancel"].includes(action)) return;
+  const { rows } = await query("DELETE FROM dela_bot_drafts WHERE id=$1 AND telegram_user_id=$2 AND expires_at>NOW() RETURNING *", [draftId, senderId]);
+  const draft = rows[0];
+  if (!draft) return telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Черновик уже обработан или истёк" });
+  if (action === "cancel") {
+    await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Отменено" });
+    return telegram("editMessageText", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, text: "Добавление отменено." });
+  }
+  let created;
+  if (draft.kind === "task") {
+    created = await query(`INSERT INTO dela_tasks(title,created_by,updated_by) VALUES($1,$2,$2) RETURNING id,title`, [draft.payload.title, draft.actor_name]);
+    await delaAudit(draft.actor_name, "Создана задача через Telegram", "task", created.rows[0].id, { title: draft.payload.title });
+  } else {
+    created = await query(`INSERT INTO dela_news(title,body,link,author) VALUES($1,$2,$3,$4) RETURNING id,title`, [draft.payload.title, draft.payload.body || "", draft.payload.link || null, draft.actor_name]);
+    await delaAudit(draft.actor_name, "Добавлена новость через Telegram", "news", created.rows[0].id, { title: draft.payload.title });
+  }
+  await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Добавлено" });
+  return telegram("editMessageText", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, text: `${draft.kind === "task" ? "Задача" : "Новость"} добавлена: ${created.rows[0].title}` });
+}
+
+async function pollTelegram() {
+  if (!telegramToken || !telegramAllowedIds.size) return;
+  try {
+    const data = await telegram("getUpdates", { offset: telegramOffset, timeout: 25, allowed_updates: ["message", "callback_query"] });
+    for (const update of data.result || []) {
+      telegramOffset = update.update_id + 1;
+      if (update.message) await handleTelegram(update.message);
+      if (update.callback_query) await handleTelegramCallback(update.callback_query);
+    }
+  } catch (error) { console.error("Telegram polling error", error.message); }
+  setTimeout(pollTelegram, 1000);
+}
+
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(error.code === "23505" ? 409 : 500).json({ error: error.code === "23505" ? "Такой логин уже существует" : "Ошибка сервера" });
+  const status = error.status || (error.code === "23505" ? 409 : 500);
+  res.status(status).json({ error: error.code === "23505" ? "Такая запись уже существует" : status === 500 ? "Ошибка сервера" : error.message });
 });
 
+app.get("/dela", (_req, res) => res.sendFile(path.join(root, "public", "dela", "index.html")));
+app.get("/dela/*splat", (_req, res) => res.sendFile(path.join(root, "public", "dela", "index.html")));
 app.get("*splat", (_req, res) => res.sendFile(path.join(root, "public", "index.html")));
-app.listen(port, "0.0.0.0", () => console.log(`APL Predictor listening on ${port}`));
+app.listen(port, "0.0.0.0", () => { console.log(`APL Predictor listening on ${port}`); pollTelegram(); });

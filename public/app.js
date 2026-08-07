@@ -66,7 +66,7 @@ function render() {
   const isAdmin = state.user.role === "admin";
   const participantPasswordForm = state.user.must_change_password && !isAdmin ? passwordView() : "";
   app.innerHTML = `<header class="top"><div class="brand">${brandMark()}<span class="brand-copy"><strong>Лига лысых шарлатанов</strong><small>Футбольные прогнозы</small></span></div>
-    <div class="account"><small>${esc(state.user.display_name)} · ${isAdmin ? "Администратор" : "Участник"}</small><button class="link" id="logout">Выйти</button></div></header>
+    <div class="account">${state.canUseDela ? `<a class="link" href="/dela">Дела</a>` : ""}<small>${esc(state.user.display_name)} · ${isAdmin ? "Администратор" : "Участник"}</small><button class="link" id="logout">Выйти</button></div></header>
     <section class="hero"><div class="hero-copy"><span class="kicker">Премьер-лига · ${esc(state.settings?.season_name || "сезон 2026/27")}</span><div class="matchday"><span class="round-badge"><small>Тур</small><b>${round}</b></span><div><h1>Матчдэй ${round}</h1></div></div></div>
       <nav class="tabs"><button data-tab="predictions" class="${tab === "predictions" ? "active" : ""}">Прогнозы</button><button data-tab="table" class="${tab === "table" ? "active" : ""}">Таблица</button>${isAdmin ? `<button data-tab="admin" class="${tab === "admin" ? "active" : ""}">Управление</button>` : ""}</nav></section>
     <main class="wrap">${state.user.must_change_password ? `<div class="notice">При первом входе смените временный пароль ${isAdmin ? "в разделе «Управление»" : "в форме ниже"}.</div>` : ""}${participantPasswordForm}${content()}</main>`;
