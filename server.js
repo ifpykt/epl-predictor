@@ -165,9 +165,9 @@ function selectionBonus(selection, predictions, fixtures, settings) {
   const fixture = fixtureMap.get(String(selection.fixture_id));
   if (!prediction || !fixture || fixture.home_score === null || fixture.away_score === null) return 0;
   if (code === "GAME_TOTAL") {
-    const qualifyingScorer = (fixture.home_score > 0 && Math.abs(prediction.home_score - fixture.home_score) <= 2)
-      || (fixture.away_score > 0 && Math.abs(prediction.away_score - fixture.away_score) <= 2);
-    return qualifyingScorer ? fixture.home_score + fixture.away_score : 0;
+    const bothTeamsWithinRange = Math.abs(prediction.home_score - fixture.home_score) <= 2
+      && Math.abs(prediction.away_score - fixture.away_score) <= 2;
+    return bothTeamsWithinRange ? fixture.home_score + fixture.away_score : 0;
   }
   if (code === "ALL_IN") {
     const exact = prediction.home_score === fixture.home_score && prediction.away_score === fixture.away_score;
