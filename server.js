@@ -231,7 +231,8 @@ app.get("/api/state", auth, async (req, res) => {
   const [fixtures, predictions, allPredictions, users, settings, functions] = await Promise.all([
     query("SELECT * FROM fixtures ORDER BY round,kickoff"),
     query(`SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id
-           JOIN fixtures f ON f.id=p.fixture_id WHERE p.user_id=$1 OR f.kickoff<=NOW()`, [req.user.id]),
+           JOIN fixtures f ON f.id=p.fixture_id
+           WHERE p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED'))`, [req.user.id]),
     query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE"),
     query("SELECT id,login,display_name,role,active,must_change_password,last_login_at FROM users ORDER BY id"),
     query("SELECT * FROM league_settings WHERE id=1"),
@@ -263,6 +264,15 @@ app.get("/api/state", auth, async (req, res) => {
   }
   const ownFunctions = functions.rows.filter((item) => String(item.user_id) === String(req.user.id));
   const ownPredictions = predictions.rows.filter((item) => String(item.user_id) === String(req.user.id));
+  const startedRounds = new Set(fixtures.rows
+    .filter((fixture) => new Date(fixture.kickoff) <= new Date() && !["POSTPONED", "CANCELLED"].includes(fixture.status))
+    .map((fixture) => Number(fixture.round)));
+  const visibleFunctions = req.user.role === "admin" ? functions.rows : functions.rows.filter(
+    (item) => String(item.user_id) === String(req.user.id) || startedRounds.has(Number(item.round)),
+  );
+  const participants = users.rows.filter((item) => item.active).map(
+    (item) => ({ id: item.id, display_name: item.display_name }),
+  );
   const functionPotential = {};
   for (const selection of ownFunctions) {
     if (matchFunctionCodes.has(selection.function_code)) continue;
@@ -282,9 +292,10 @@ app.get("/api/state", auth, async (req, res) => {
     canUseDela: canUseDela(req.user),
     fixtures: fixtures.rows,
     predictions: predictions.rows,
+    participants,
     users: req.user.role === "admin" ? users.rows : [],
     settings: settings.rows[0],
-    functions: req.user.role === "admin" ? functions.rows : ownFunctions,
+    functions: visibleFunctions,
     functionPotential,
     ranking: [...ranking.values()].sort((a, b) => b.total - a.total),
   });
