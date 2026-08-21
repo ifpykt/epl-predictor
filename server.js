@@ -165,9 +165,9 @@ function selectionBonus(selection, predictions, fixtures, settings) {
   const fixture = fixtureMap.get(String(selection.fixture_id));
   if (!prediction || !fixture || fixture.home_score === null || fixture.away_score === null) return 0;
   if (code === "GAME_TOTAL") {
-    const qualifyingScorer = (fixture.home_score > 0 && Math.abs(prediction.home_score - fixture.home_score) <= 2)
-      || (fixture.away_score > 0 && Math.abs(prediction.away_score - fixture.away_score) <= 2);
-    return qualifyingScorer ? fixture.home_score + fixture.away_score : 0;
+    const bothTeamsWithinRange = Math.abs(prediction.home_score - fixture.home_score) <= 2
+      && Math.abs(prediction.away_score - fixture.away_score) <= 2;
+    return bothTeamsWithinRange ? fixture.home_score + fixture.away_score : 0;
   }
   if (code === "ALL_IN") {
     const exact = prediction.home_score === fixture.home_score && prediction.away_score === fixture.away_score;
@@ -303,6 +303,13 @@ app.put("/api/functions/:code", auth, async (req, res) => {
   if (new Date(fixtures.rows[0].kickoff) <= new Date()) return res.status(409).json({ error: "Тур уже начался — функцию выбрать или изменить нельзя" });
   if (matchFunctionCodes.has(code) && !fixtures.rows.some((f) => String(f.id) === String(fixtureId))) {
     return res.status(400).json({ error: "Выберите матч этого тура" });
+  }
+  const roundSelection = await query(
+    "SELECT function_code FROM season_functions WHERE user_id=$1 AND round=$2 AND function_code<>$3 LIMIT 1",
+    [req.user.id, round, code],
+  );
+  if (roundSelection.rows[0]) {
+    return res.status(409).json({ error: "В одном туре можно использовать только одну функцию" });
   }
   const current = await query(`SELECT sf.*,MIN(f.kickoff) first_kickoff FROM season_functions sf
     JOIN fixtures f ON f.round=sf.round WHERE sf.user_id=$1 AND sf.function_code=$2

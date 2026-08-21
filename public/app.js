@@ -110,22 +110,31 @@ function functionsView(fixtures) {
   const firstKickoff = fixtures[0] ? Math.min(...fixtures.map((item) => new Date(item.kickoff).getTime())) : 0;
   const roundLocked = !firstKickoff || firstKickoff <= Date.now();
   const used = seasonFunctions.filter((item) => functionSelection(item.code)).length;
+  const selectedInRound = (state.functions || []).find(
+    (item) => String(item.user_id) === String(state.user.id) && Number(item.round) === round,
+  );
   return `<section class="panel functions-panel">
-    <header class="functions-head"><div><p class="eyebrow">8 функций на сезон</p><h3>Сезонные функции</h3><p class="sub">Каждую можно применить только в одном туре. Выбор блокируется с началом первого матча тура.</p></div><b>${used} / 8</b></header>
+    <header class="functions-head"><div><p class="eyebrow">8 функций на сезон</p><h3>Сезонные функции</h3><p class="sub">Каждую можно применить только один раз за сезон, а в одном туре — только одну функцию. Выбор блокируется с началом первого матча тура.</p></div><b>${used} / 8</b></header>
     <div class="function-grid">${seasonFunctions.map((item) => {
       const selected = functionSelection(item.code);
       const selectedHere = Number(selected?.round) === round;
-      const unavailable = roundLocked || round < Number(item.minRound || 1);
+      const anotherSelectedHere = Boolean(selectedInRound) && selectedInRound.function_code !== item.code;
+      const unavailable = roundLocked || round < Number(item.minRound || 1) || (!selectedHere && anotherSelectedHere);
       const selectedFixture = selected?.fixture_id ? fixtureLabel(selected.fixture_id) : "";
+      const selectedInRoundName = seasonFunctions.find((entry) => entry.code === selectedInRound?.function_code)?.name;
+      const actionLabel = selectedHere ? "Отменить выбор"
+        : anotherSelectedHere ? `В туре уже выбрана ${selectedInRoundName}`
+          : round < Number(item.minRound || 1) ? "Доступно с 15-го тура"
+            : roundLocked ? "Тур уже начался" : `Применить в туре ${round}`;
       return `<article class="function-card ${selectedHere ? "active" : ""} ${selected && !selectedHere ? "used" : ""}" data-function-card="${item.code}">
         <div class="function-title"><span>${item.short}</span><div><b>${item.name}</b><small>${item.scope}</small></div></div>
         <p>${item.rule}</p>
         ${selected ? `<div class="function-used">Выбрано: тур ${selected.round}${selectedFixture ? ` · ${esc(selectedFixture)}` : ""}</div>` : ""}
         ${item.match && (!selected || selectedHere) ? `<select class="function-match" ${unavailable ? "disabled" : ""}><option value="">Выберите матч</option>${fixtures.map((fixture) => `<option value="${fixture.id}" ${String(selected?.fixture_id) === String(fixture.id) ? "selected" : ""}>${esc(fixture.home_name)} — ${esc(fixture.away_name)}</option>`).join("")}</select>` : ""}
-        ${!selected || selectedHere ? `<button class="${selectedHere ? "function-cancel" : "function-activate"}" data-function="${item.code}" ${unavailable ? "disabled" : ""}>${selectedHere ? "Отменить выбор" : round < Number(item.minRound || 1) ? "Доступно с 15-го тура" : roundLocked ? "Тур уже начался" : `Применить в туре ${round}`}</button>` : `<span class="function-locked">Используется один раз за сезон</span>`}
+        ${!selected || selectedHere ? `<button class="${selectedHere ? "function-cancel" : "function-activate"}" data-function="${item.code}" ${unavailable ? "disabled" : ""}>${actionLabel}</button>` : `<span class="function-locked">Используется один раз за сезон</span>`}
       </article>`;
     }).join("")}</div>
-    <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. Бонусные очки показываются отдельно и прибавляются к базе.</p><p><b>GAME TOTAL:</b> согласно приведённым примерам начисляется весь фактический тотал, если хотя бы у одной забившей команды прогноз отличается не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
+    <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. Бонусные очки показываются отдельно и прибавляются к базе.</p><p><b>GAME TOTAL:</b> начисляется весь фактический тотал, если прогноз по голам каждой команды отклоняется от результата не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
   </section>`;
 }
 
