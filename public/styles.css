@@ -402,12 +402,36 @@ select:focus-visible {
 .toolbar h2 { margin: 0; font-size: 28px; letter-spacing: -.025em; }
 
 .round-select {
+  min-width: 112px;
   padding: 10px 36px 10px 13px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
   font-weight: 800;
 }
+
+.round-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.round-arrow,
+.current-round-button {
+  min-height: 41px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.round-arrow { width: 41px; padding: 0; font-size: 18px; }
+.current-round-button { padding: 8px 12px; font-size: 11px; }
+.round-arrow:hover:not(:disabled),
+.current-round-button:hover:not(:disabled) { border-color: var(--field); color: var(--field); }
+.current-round-button:disabled { border-color: #bfd377; background: #f5fbdc; color: var(--forest); opacity: 1; }
 
 .grid {
   display: grid;
@@ -686,6 +710,10 @@ select:focus-visible {
   .brand-copy small, .account small { display: none; }
   .account { gap: 3px; }
   .wrap { width: min(calc(100% - 20px), 1180px); }
+  .toolbar { flex-wrap: wrap; }
+  .round-controls { width: 100%; justify-content: stretch; flex-wrap: wrap; }
+  .round-controls .round-select { min-width: 0; flex: 1; }
+  .current-round-button { flex: 1 0 100%; }
   .functions-head { align-items: flex-start; padding: 16px; }
   .functions-head h3 { font-size: 20px; }
   .function-grid { grid-template-columns: 1fr; padding: 10px; }
