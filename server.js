@@ -262,7 +262,7 @@ app.get("/api/state", auth, async (req, res) => {
     query("SELECT * FROM fixtures ORDER BY round,kickoff"),
     query(`SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id
            JOIN fixtures f ON f.id=p.fixture_id
-           WHERE p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED'))`, [req.user.id]),
+           WHERE u.active=TRUE AND (p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED')))`, [req.user.id]),
     query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE"),
     query("SELECT id,login,display_name,role,active,must_change_password,last_login_at FROM users ORDER BY id"),
     query("SELECT * FROM league_settings WHERE id=1"),
