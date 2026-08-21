@@ -91,7 +91,7 @@ function points(prediction, fixture, settings = { exact_points: 3, difference_po
   if (prediction.pred_home === fixture.home_score && prediction.pred_away === fixture.away_score) value = settings.exact_points;
   else if (prediction.pred_home - prediction.pred_away === fixture.home_score - fixture.away_score) value = settings.difference_points;
   else if (Math.sign(prediction.pred_home - prediction.pred_away) === Math.sign(fixture.home_score - fixture.away_score)) value = settings.outcome_points;
-  return value;
+  return value * (prediction.bonus ? 2 : 1);
 }
 
 function standingsBeforeRound(fixtures, targetRound) {
@@ -414,19 +414,42 @@ app.put("/api/predictions/:fixtureId", auth, async (req, res) => {
   const fixtureId = Number(req.params.fixtureId);
   const home = score(req.body.homeScore);
   const away = score(req.body.awayScore);
+  const bonus = Boolean(req.body.bonus);
   if (!fixtureId || home === null || away === null) return res.status(400).json({ error: "Проверьте счёт" });
   const { rows } = await query("SELECT round,kickoff FROM fixtures WHERE id=$1", [fixtureId]);
   const fixture = rows[0];
   if (!fixture) return res.status(404).json({ error: "Матч не найден" });
   if (new Date(fixture.kickoff) <= new Date()) return res.status(409).json({ error: "Матч уже начался" });
+  if (bonus) {
+    const { rows: settings } = await query("SELECT joker_enabled FROM league_settings WHERE id=1");
+    if (!settings[0]?.joker_enabled) return res.status(409).json({ error: "Матч ×2 отключён в правилах лиги" });
+  }
   await transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1),$2)", [String(req.user.id), Number(fixture.round)]);
+    if (bonus) {
+      const existing = await client.query(
+        `SELECT p.fixture_id,f.kickoff FROM predictions p
+         JOIN fixtures f ON f.id=p.fixture_id
+         WHERE p.user_id=$1 AND f.round=$2 AND p.bonus=TRUE AND p.fixture_id<>$3
+         FOR UPDATE`,
+        [req.user.id, fixture.round, fixtureId],
+      );
+      if (existing.rows.some((item) => new Date(item.kickoff) <= new Date())) {
+        throw Object.assign(new Error("Матч ×2 в этом туре уже начался — изменить выбор нельзя"), { status: 409 });
+      }
+      await client.query(
+        `UPDATE predictions SET bonus=FALSE WHERE user_id=$1 AND fixture_id IN
+         (SELECT id FROM fixtures WHERE round=$2)`,
+        [req.user.id, fixture.round],
+      );
+    }
     await client.query(
       `INSERT INTO predictions(user_id,fixture_id,home_score,away_score,bonus)
        VALUES($1,$2,$3,$4,$5)
        ON CONFLICT(user_id,fixture_id) DO UPDATE SET
        home_score=EXCLUDED.home_score,away_score=EXCLUDED.away_score,
        bonus=EXCLUDED.bonus,updated_at=NOW()`,
-      [req.user.id, fixtureId, home, away, false],
+      [req.user.id, fixtureId, home, away, bonus],
     );
   });
   res.json({ ok: true });
