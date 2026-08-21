@@ -116,7 +116,7 @@ function standingsBeforeRound(fixtures, targetRound) {
     .map((item, index) => [item.name, index + 1]));
 }
 
-function selectionBonus(selection, predictions, fixtures, settings) {
+function selectionBonusBreakdown(selection, predictions, fixtures, settings) {
   const roundFixtures = fixtures.filter((fixture) => Number(fixture.round) === Number(selection.round));
   const fixtureMap = new Map(roundFixtures.map((fixture) => [String(fixture.id), fixture]));
   const roundPredictions = predictions.filter((prediction) => fixtureMap.has(String(prediction.fixture_id)));
@@ -124,59 +124,89 @@ function selectionBonus(selection, predictions, fixtures, settings) {
     const fixture = fixtureMap.get(String(prediction.fixture_id));
     return fixture.home_score !== null && fixture.away_score !== null;
   });
+  const breakdown = new Map();
+  const set = (prediction, value) => breakdown.set(String(prediction.fixture_id), value);
   const code = selection.function_code;
-  if (code === "DRAW_RAGE") return completed.reduce((sum, p) => {
-    const f = fixtureMap.get(String(p.fixture_id));
-    return sum + (p.home_score === p.away_score && f.home_score === f.away_score ? 2 : 0);
-  }, 0);
-  if (code === "GOAL_STREAK") return completed.reduce((sum, p) => {
-    const f = fixtureMap.get(String(p.fixture_id));
-    return sum + (Math.min(p.home_score, f.home_score) + Math.min(p.away_score, f.away_score)) * 0.5;
-  }, 0);
-  if (code === "CLEAN_SHEET") return completed.reduce((sum, p) => {
-    const f = fixtureMap.get(String(p.fixture_id));
-    return sum + (p.home_score === 0 && f.home_score === 0 ? 2 : 0) + (p.away_score === 0 && f.away_score === 0 ? 2 : 0);
-  }, 0);
-  if (code === "AWAY_VICTORY") return completed.reduce((sum, p) => {
-    const f = fixtureMap.get(String(p.fixture_id));
-    return sum + (p.home_score < p.away_score && f.home_score < f.away_score ? 2 : 0);
-  }, 0);
-  if (code === "BTTS") return completed.reduce((sum, p) => {
-    const f = fixtureMap.get(String(p.fixture_id));
-    return sum + (p.home_score > 0 && p.away_score > 0 && f.home_score > 0 && f.away_score > 0 ? 1.5 : 0);
-  }, 0);
-  if (code === "UNDERDOGS_PRIME") {
-    if (Number(selection.round) < 15) return 0;
-    const positions = standingsBeforeRound(fixtures, selection.round);
-    return completed.reduce((sum, p) => {
-      const f = fixtureMap.get(String(p.fixture_id));
-      const homePos = positions.get(f.home_name);
-      const awayPos = positions.get(f.away_name);
-      if (!homePos || !awayPos || homePos === awayPos) return sum;
-      const underdogHome = homePos > awayPos;
-      const predictedUnderdogWin = underdogHome ? p.home_score > p.away_score : p.away_score > p.home_score;
-      const actualUnderdogWin = underdogHome ? f.home_score > f.away_score : f.away_score > f.home_score;
-      if (predictedUnderdogWin && actualUnderdogWin) return sum + 2;
-      if (p.home_score === p.away_score && f.home_score === f.away_score) return sum + 1;
-      return sum;
-    }, 0);
+
+  if (code === "DRAW_RAGE") {
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      set(prediction, prediction.home_score === prediction.away_score && fixture.home_score === fixture.away_score ? 2 : 0);
+    });
+    return breakdown;
   }
-  const prediction = roundPredictions.find((p) => String(p.fixture_id) === String(selection.fixture_id));
+  if (code === "GOAL_STREAK") {
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      set(prediction, (Math.min(prediction.home_score, fixture.home_score) + Math.min(prediction.away_score, fixture.away_score)) * 0.5);
+    });
+    return breakdown;
+  }
+  if (code === "CLEAN_SHEET") {
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      set(prediction, (prediction.home_score === 0 && fixture.home_score === 0 ? 2 : 0)
+        + (prediction.away_score === 0 && fixture.away_score === 0 ? 2 : 0));
+    });
+    return breakdown;
+  }
+  if (code === "AWAY_VICTORY") {
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      set(prediction, prediction.home_score < prediction.away_score && fixture.home_score < fixture.away_score ? 2 : 0);
+    });
+    return breakdown;
+  }
+  if (code === "BTTS") {
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      set(prediction, prediction.home_score > 0 && prediction.away_score > 0
+        && fixture.home_score > 0 && fixture.away_score > 0 ? 1.5 : 0);
+    });
+    return breakdown;
+  }
+  if (code === "UNDERDOGS_PRIME") {
+    if (Number(selection.round) < 15) return breakdown;
+    const positions = standingsBeforeRound(fixtures, selection.round);
+    completed.forEach((prediction) => {
+      const fixture = fixtureMap.get(String(prediction.fixture_id));
+      const homePos = positions.get(fixture.home_name);
+      const awayPos = positions.get(fixture.away_name);
+      if (!homePos || !awayPos || homePos === awayPos) return set(prediction, 0);
+      const underdogHome = homePos > awayPos;
+      const predictedUnderdogWin = underdogHome
+        ? prediction.home_score > prediction.away_score : prediction.away_score > prediction.home_score;
+      const actualUnderdogWin = underdogHome
+        ? fixture.home_score > fixture.away_score : fixture.away_score > fixture.home_score;
+      if (predictedUnderdogWin && actualUnderdogWin) return set(prediction, 2);
+      if (prediction.home_score === prediction.away_score && fixture.home_score === fixture.away_score) return set(prediction, 1);
+      return set(prediction, 0);
+    });
+    return breakdown;
+  }
+
+  const prediction = roundPredictions.find((item) => String(item.fixture_id) === String(selection.fixture_id));
   const fixture = fixtureMap.get(String(selection.fixture_id));
-  if (!prediction || !fixture || fixture.home_score === null || fixture.away_score === null) return 0;
+  if (!prediction || !fixture || fixture.home_score === null || fixture.away_score === null) return breakdown;
   if (code === "GAME_TOTAL") {
     const bothTeamsWithinRange = Math.abs(prediction.home_score - fixture.home_score) <= 2
       && Math.abs(prediction.away_score - fixture.away_score) <= 2;
-    return bothTeamsWithinRange ? fixture.home_score + fixture.away_score : 0;
+    set(prediction, bothTeamsWithinRange ? fixture.home_score + fixture.away_score : 0);
   }
   if (code === "ALL_IN") {
     const exact = prediction.home_score === fixture.home_score && prediction.away_score === fixture.away_score;
-    if (!exact) return -6;
-    return roundPredictions.reduce((sum, p) => sum + (points(
-      { pred_home: p.home_score, pred_away: p.away_score }, fixtureMap.get(String(p.fixture_id)), settings,
-    ) || 0), 0);
+    set(prediction, exact ? roundPredictions.reduce((sum, item) => sum + (points(
+      { pred_home: item.home_score, pred_away: item.away_score },
+      fixtureMap.get(String(item.fixture_id)),
+      settings,
+    ) || 0), 0) : -6);
   }
-  return 0;
+  return breakdown;
+}
+
+function selectionBonus(selection, predictions, fixtures, settings) {
+  return [...selectionBonusBreakdown(selection, predictions, fixtures, settings).values()]
+    .reduce((sum, value) => sum + value, 0);
 }
 
 function predictionPotential(code, prediction, fixture, fixtures, round) {
@@ -232,7 +262,7 @@ app.get("/api/state", auth, async (req, res) => {
     query("SELECT * FROM fixtures ORDER BY round,kickoff"),
     query(`SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id
            JOIN fixtures f ON f.id=p.fixture_id
-           WHERE p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED'))`, [req.user.id]),
+           WHERE u.active=TRUE AND (p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED')))`, [req.user.id]),
     query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE"),
     query("SELECT id,login,display_name,role,active,must_change_password,last_login_at FROM users ORDER BY id"),
     query("SELECT * FROM league_settings WHERE id=1"),
@@ -240,28 +270,67 @@ app.get("/api/state", auth, async (req, res) => {
   ]);
   const ranking = new Map();
   const fixtureMap = new Map(fixtures.rows.map((item) => [String(item.id), item]));
+  const functionPoints = new Map();
+  const createRankingItem = (name) => ({ name, base: 0, bonus: 0, total: 0, rounds: {} });
+  const roundLine = (item, fixtureRound) => {
+    const key = String(fixtureRound);
+    if (!item.rounds[key]) item.rounds[key] = { base: 0, bonus: 0, total: 0 };
+    return item.rounds[key];
+  };
+  users.rows.filter((user) => user.active).forEach((user) => {
+    if (!ranking.has(user.display_name)) ranking.set(user.display_name, createRankingItem(user.display_name));
+  });
   for (const prediction of allPredictions.rows) {
+    const fixture = fixtureMap.get(String(prediction.fixture_id));
     const result = points(
       { pred_home: prediction.home_score, pred_away: prediction.away_score, bonus: prediction.bonus },
-      fixtureMap.get(String(prediction.fixture_id)), settings.rows[0],
+      fixture,
+      settings.rows[0],
     );
     if (result !== null) {
-      const item = ranking.get(prediction.display_name) || { name: prediction.display_name, base: 0, bonus: 0, total: 0 };
+      const item = ranking.get(prediction.display_name) || createRankingItem(prediction.display_name);
+      const line = roundLine(item, fixture.round);
       item.base += result;
       item.total += result;
+      line.base += result;
+      line.total += result;
       ranking.set(prediction.display_name, item);
     }
   }
   for (const selection of functions.rows) {
-    const userPredictions = allPredictions.rows.filter((p) => String(p.user_id) === String(selection.user_id));
-    const user = userPredictions[0]?.display_name || users.rows.find((u) => String(u.id) === String(selection.user_id))?.display_name;
+    const userPredictions = allPredictions.rows.filter((prediction) => String(prediction.user_id) === String(selection.user_id));
+    const user = userPredictions[0]?.display_name
+      || users.rows.find((item) => String(item.id) === String(selection.user_id))?.display_name;
     if (!user) continue;
-    const bonus = selectionBonus(selection, userPredictions, fixtures.rows, settings.rows[0]);
-    const item = ranking.get(user) || { name: user, base: 0, bonus: 0, total: 0 };
+    const breakdown = selectionBonusBreakdown(selection, userPredictions, fixtures.rows, settings.rows[0]);
+    const bonus = [...breakdown.values()].reduce((sum, value) => sum + value, 0);
+    const item = ranking.get(user) || createRankingItem(user);
+    const line = roundLine(item, selection.round);
     item.bonus += bonus;
     item.total += bonus;
+    line.bonus += bonus;
+    line.total += bonus;
     ranking.set(user, item);
+    for (const [fixtureId, value] of breakdown) {
+      const key = `${selection.user_id}:${fixtureId}`;
+      functionPoints.set(key, (functionPoints.get(key) || 0) + value);
+    }
   }
+  const scoredPredictions = predictions.rows.map((prediction) => {
+    const fixture = fixtureMap.get(String(prediction.fixture_id));
+    const basePoints = points(
+      { pred_home: prediction.home_score, pred_away: prediction.away_score, bonus: prediction.bonus },
+      fixture,
+      settings.rows[0],
+    );
+    const bonusPoints = functionPoints.get(`${prediction.user_id}:${prediction.fixture_id}`) || 0;
+    return {
+      ...prediction,
+      base_points: basePoints,
+      function_points: basePoints === null ? null : bonusPoints,
+      total_points: basePoints === null ? null : basePoints + bonusPoints,
+    };
+  });
   const ownFunctions = functions.rows.filter((item) => String(item.user_id) === String(req.user.id));
   const ownPredictions = predictions.rows.filter((item) => String(item.user_id) === String(req.user.id));
   const startedRounds = new Set(fixtures.rows
@@ -291,7 +360,7 @@ app.get("/api/state", auth, async (req, res) => {
     user: req.user,
     canUseDela: canUseDela(req.user),
     fixtures: fixtures.rows,
-    predictions: predictions.rows,
+    predictions: scoredPredictions,
     participants,
     users: req.user.role === "admin" ? users.rows : [],
     settings: settings.rows[0],

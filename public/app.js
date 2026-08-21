@@ -4,6 +4,7 @@ let round = 1;
 let tab = "predictions";
 let adminTab = "overview";
 let adminData = null;
+let functionsExpanded = false;
 
 const seasonFunctions = [
   { code: "DRAW_RAGE", name: "DRAW RAGE", scope: "Весь тур", short: "DR", rule: "За каждую угаданную ничью — +2 очка." },
@@ -141,8 +142,8 @@ function functionsView(fixtures) {
   const selectedInRound = (state.functions || []).find(
     (item) => String(item.user_id) === String(state.user.id) && Number(item.round) === round,
   );
-  return `<section class="panel functions-panel">
-    <header class="functions-head"><div><p class="eyebrow">8 функций на сезон</p><h3>Сезонные функции</h3><p class="sub">Каждую можно применить только один раз за сезон, а в одном туре — только одну функцию. Выбор блокируется с началом первого матча тура.</p></div><b>${used} / 8</b></header>
+  return `<details class="panel functions-panel" ${functionsExpanded ? "open" : ""}>
+    <summary class="functions-head"><div><p class="eyebrow">8 функций на сезон</p><h3>Сезонные функции</h3><p class="sub">Каждую можно применить только один раз за сезон, а в одном туре — только одну функцию. Выбор блокируется с началом первого матча тура.</p></div><b>${used} / 8 · ${functionsExpanded ? "Свернуть" : "Развернуть"}</b></summary>
     <div class="function-grid">${seasonFunctions.map((item) => {
       const selected = functionSelection(item.code);
       const selectedHere = Number(selected?.round) === round;
@@ -163,7 +164,7 @@ function functionsView(fixtures) {
       </article>`;
     }).join("")}</div>
     <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. В каждом туре можно выбрать один матч ×2 и удвоить базовые очки за него. ×2 не относится к восьми сезонным функциям.</p><p><b>GAME TOTAL:</b> начисляется весь фактический тотал, если прогноз по голам каждой команды отклоняется от результата не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
-  </section>`;
+  </details>`;
 }
 
 function matchView(fixture) {
@@ -193,8 +194,16 @@ function matchView(fixture) {
     <div class="match-actions"><button class="bonus ${p?.bonus ? "on" : ""}" ${bonusDisabled ? "disabled" : ""} title="${esc(bonusTitle)}">×2</button><div class="match-functions">${potential.map((item) => `<span title="${esc(item.rule)}">${item.short}</span>`).join("")}</div></div></article>`;
 }
 
+function formatPoints(value) {
+  return Number(value || 0).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+}
+
 function ranking() {
-  return state.ranking.length ? state.ranking.map((x, i) => `<div class="rank"><span>${i + 1}. ${esc(x.name)}<small>${x.bonus ? `База ${x.base} · функции ${x.bonus > 0 ? "+" : ""}${x.bonus}` : ""}</small></span><b>${x.total}</b></div>`).join("") : `<p class="sub">Очки появятся после первых результатов.</p>`;
+  if (!state.ranking.length) return `<p class="sub">Очки появятся после первых результатов.</p>`;
+  return `<div class="ranking-head"><span>Участник</span><span>Тур ${round}</span><span>Всего</span></div>${state.ranking.map((item, index) => {
+    const roundPoints = item.rounds?.[String(round)] || { base: 0, bonus: 0, total: 0 };
+    return `<div class="rank"><span>${index + 1}. ${esc(item.name)}<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small></span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
+  }).join("")}`;
 }
 
 function tableView() {
@@ -226,7 +235,12 @@ function tableView() {
             prediction?.bonus ? "×2" : "",
             ...userFunctions.map((item) => seasonFunctions.find((entry) => entry.code === item.function_code)?.short || item.function_code),
           ].filter(Boolean);
-          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(participant.display_name)}${tags.length ? `<small class="admin-function-tags">${tags.map(esc).join(" · ")}</small>` : ""}</span>${prediction ? `<b>${prediction.home_score}:${prediction.away_score}</b>` : `<small>Нет прогноза</small>`}</div>`;
+          const pointsLabel = prediction?.total_points === null || prediction?.total_points === undefined
+            ? "Очки после результата"
+            : `${prediction.total_points > 0 ? "+" : ""}${formatPoints(prediction.total_points)} очк.`;
+          const breakdownLabel = prediction?.total_points === null || prediction?.total_points === undefined
+            ? "" : `База ${formatPoints(prediction.base_points)} · функции ${prediction.function_points > 0 ? "+" : ""}${formatPoints(prediction.function_points)}`;
+          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(participant.display_name)}${tags.length ? `<small class="admin-function-tags">${tags.map(esc).join(" · ")}</small>` : ""}</span>${prediction ? `<div class="prediction-score"><b>${prediction.home_score}:${prediction.away_score}</b><small class="prediction-earned">${pointsLabel}${breakdownLabel ? `<em>${breakdownLabel}</em>` : ""}</small></div>` : `<small>Нет прогноза</small>`}</div>`;
         }).join("") : `<div class="empty">Участников пока нет.</div>`}</div>`
           : `<div class="predictions-hidden">Прогнозы откроются после начала матча</div>`}
         <footer class="prediction-admin-status"><span class="${started ? "closed" : "open"}">${started ? "Прогнозы открыты" : "Приём продолжается"}</span>${result}</footer>
@@ -361,6 +375,8 @@ function bind() {
     round = automaticRound();
     render();
   };
+  const functionsPanel = document.querySelector(".functions-panel");
+  if (functionsPanel) functionsPanel.ontoggle = () => { functionsExpanded = functionsPanel.open; };
   document.querySelectorAll(".match").forEach((row) => {
     const save = async () => {
       const homeScore = row.querySelector('[data-side="home"]').value;
