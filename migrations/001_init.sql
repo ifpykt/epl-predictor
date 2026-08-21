@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS season_functions (
     OR (function_code NOT IN ('GAME_TOTAL','ALL_IN') AND fixture_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS season_functions_round_idx ON season_functions(round,user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS season_functions_one_per_round_idx ON season_functions(user_id,round);
 
 CREATE TABLE IF NOT EXISTS league_settings (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
