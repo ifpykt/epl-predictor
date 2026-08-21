@@ -200,9 +200,14 @@ function formatPoints(value) {
 
 function ranking() {
   if (!state.ranking.length) return `<p class="sub">Очки появятся после первых результатов.</p>`;
+  const roundHasResults = state.fixtures.some((fixture) =>
+    Number(fixture.round) === round && fixture.home_score !== null && fixture.away_score !== null);
   return `<div class="ranking-head"><span>Участник</span><span>Тур ${round}</span><span>Всего</span></div>${state.ranking.map((item, index) => {
     const roundPoints = item.rounds?.[String(round)] || { base: 0, bonus: 0, total: 0 };
-    return `<div class="rank"><span>${index + 1}. ${esc(item.name)}<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small></span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
+    const breakdown = roundHasResults
+      ? `<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small>`
+      : "";
+    return `<div class="rank"><span>${index + 1}. ${esc(item.name)}${breakdown}</span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
   }).join("")}`;
 }
 
