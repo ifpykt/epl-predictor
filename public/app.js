@@ -27,6 +27,35 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+function availableRounds() {
+  return [...new Set((state?.fixtures || []).map((fixture) => Number(fixture.round)))]
+    .filter(Number.isInteger)
+    .sort((a, b) => a - b);
+}
+
+function automaticRound() {
+  const fixtures = (state?.fixtures || []).filter((fixture) =>
+    !["POSTPONED", "CANCELLED"].includes(fixture.status)
+    && Number.isFinite(new Date(fixture.kickoff).getTime()));
+  const upcoming = fixtures
+    .filter((fixture) => new Date(fixture.kickoff).getTime() > Date.now())
+    .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff))[0];
+  if (upcoming) return Number(upcoming.round);
+  const latest = fixtures.sort((a, b) => new Date(b.kickoff) - new Date(a.kickoff))[0];
+  return Number(latest?.round || availableRounds().at(-1) || 1);
+}
+
+function roundControls(rounds = availableRounds()) {
+  const index = rounds.indexOf(round);
+  const current = automaticRound();
+  return `<div class="round-controls">
+    <button type="button" class="round-arrow" data-round-step="-1" ${index <= 0 ? "disabled" : ""} aria-label="Предыдущий тур">←</button>
+    <select class="round-select" id="round">${rounds.map((item) => `<option value="${item}" ${item === round ? "selected" : ""}>Тур ${item}</option>`).join("")}</select>
+    <button type="button" class="round-arrow" data-round-step="1" ${index < 0 || index >= rounds.length - 1 ? "disabled" : ""} aria-label="Следующий тур">→</button>
+    <button type="button" class="current-round-button" data-current-round ${round === current ? "disabled" : ""}>Текущий тур · ${current}</button>
+  </div>`;
+}
+
 function brandMark() {
   return `<svg class="brand-mark" viewBox="0 0 64 72" aria-hidden="true">
     <path d="M32 2 58 12v20c0 17.8-10.7 29.5-26 38C16.7 61.5 6 49.8 6 32V12L32 2Z" fill="#0b3328"/>
@@ -63,8 +92,7 @@ function loginView(error = "") {
 async function load() {
   try {
     state = await api("/api/state");
-    const upcoming = state.fixtures.find((f) => new Date(f.kickoff) > new Date());
-    round = Number(upcoming?.round || state.fixtures.at(-1)?.round || 1);
+    round = automaticRound();
     render();
   } catch { loginView(); }
 }
@@ -98,9 +126,9 @@ function render() {
 function content() {
   if (tab === "table") return tableView();
   if (tab === "admin" && state.user.role === "admin") return adminView();
-  const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a, b) => a - b);
+  const rounds = availableRounds();
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
-  return `<div class="toolbar"><h2>Ваш прогноз</h2><select class="round-select" id="round">${rounds.map((r) => `<option value="${r}" ${r === round ? "selected" : ""}>Тур ${r}</option>`).join("")}</select></div>
+  return `<div class="toolbar"><h2>Ваш прогноз</h2>${roundControls(rounds)}</div>
     ${functionsView(fixtures)}
     <div class="grid"><section class="panel">${fixtures.length ? fixtures.map(matchView).join("") : `<div class="empty">Календарь ещё не загружен. Администратору нужно нажать «Получить календарь».</div>`}</section>
     <aside class="panel side"><h3>Лидеры сезона</h3>${ranking()}</aside></div>`;
@@ -170,11 +198,11 @@ function ranking() {
 }
 
 function tableView() {
-  const rounds = [...new Set(state.fixtures.map((fixture) => Number(fixture.round)))].sort((a, b) => a - b);
+  const rounds = availableRounds();
   const fixtures = state.fixtures.filter((fixture) => Number(fixture.round) === round);
   const participants = state.participants || [];
   return `<div class="toolbar"><div><h2>Общий зачёт</h2><p class="sub">Прогнозы участников открываются после начала каждого матча.</p></div>
-      <select class="round-select" id="round">${rounds.map((item) => `<option value="${item}" ${item === round ? "selected" : ""}>Тур ${item}</option>`).join("")}</select></div>
+      ${roundControls(rounds)}</div>
     <section class="panel side table-ranking">${ranking()}</section>
     <div class="toolbar compact public-predictions-head"><div><h3>Прогнозы участников · тур ${round}</h3><p class="sub">До стартового свистка чужие прогнозы скрыты.</p></div></div>
     <section class="prediction-admin-list public-predictions">${fixtures.length ? fixtures.map((fixture) => {
@@ -244,13 +272,13 @@ function adminContent() {
 }
 
 function predictionsAdminView() {
-  const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a,b)=>a-b);
+  const rounds = availableRounds();
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
   const users = adminData.users.filter((u) => u.active);
   const predictions = adminData.predictions || [];
   const functions = adminData.functions || [];
   return `<div class="toolbar compact"><div><h3>Прогнозы участников</h3><p class="sub admin-predictions-note">Доступны вам как независимому администратору. Для участников чужие прогнозы до начала матча остаются скрыты.</p></div>
-      <select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
+      ${roundControls(rounds)}</div>
     <section class="prediction-admin-list">${fixtures.length ? fixtures.map((fixture) => {
       const fixturePredictions = predictions.filter((prediction) => String(prediction.fixture_id) === String(fixture.id));
       const byUser = new Map(fixturePredictions.map((prediction) => [String(prediction.user_id), prediction]));
@@ -279,9 +307,9 @@ const fixtureStatuses = {
 };
 
 function fixturesAdminView() {
-  const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a,b)=>a-b);
+  const rounds = availableRounds();
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
-  return `<div class="toolbar compact"><div><h3>Матчи сезона</h3><p class="sub fixture-help">Изменяйте данные только при переносе, отмене или ручном исправлении результата.</p></div><select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
+  return `<div class="toolbar compact"><div><h3>Матчи сезона</h3><p class="sub fixture-help">Изменяйте данные только при переносе, отмене или ручном исправлении результата.</p></div>${roundControls(rounds)}</div>
     <section class="admin-list fixture-list">${fixtures.map((f)=>`<form class="panel fixture-row" data-fixture-form="${f.id}">
       <div class="fixture-name"><span class="fixture-status status-${esc(f.status.toLowerCase())}">${esc(fixtureStatuses[f.status] || f.status)}</span><b>${esc(f.home_name)} — ${esc(f.away_name)}</b></div>
       <label class="fixture-field"><span>Дата и время</span><input name="kickoff" type="datetime-local" value="${new Date(new Date(f.kickoff).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}"></label>
@@ -318,6 +346,19 @@ function bind() {
     const selectedRound = Number(roundSelect.value);
     if (!Number.isInteger(selectedRound)) return;
     round = selectedRound;
+    render();
+  };
+  document.querySelectorAll("[data-round-step]").forEach((button) => button.onclick = () => {
+    const rounds = availableRounds();
+    const index = rounds.indexOf(round);
+    const next = rounds[index + Number(button.dataset.roundStep)];
+    if (!Number.isInteger(next)) return;
+    round = next;
+    render();
+  });
+  const currentRoundButton = document.querySelector("[data-current-round]");
+  if (currentRoundButton) currentRoundButton.onclick = () => {
+    round = automaticRound();
     render();
   };
   document.querySelectorAll(".match").forEach((row) => {
