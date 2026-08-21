@@ -304,6 +304,13 @@ app.put("/api/functions/:code", auth, async (req, res) => {
   if (matchFunctionCodes.has(code) && !fixtures.rows.some((f) => String(f.id) === String(fixtureId))) {
     return res.status(400).json({ error: "Выберите матч этого тура" });
   }
+  const roundSelection = await query(
+    "SELECT function_code FROM season_functions WHERE user_id=$1 AND round=$2 AND function_code<>$3 LIMIT 1",
+    [req.user.id, round, code],
+  );
+  if (roundSelection.rows[0]) {
+    return res.status(409).json({ error: "В одном туре можно использовать только одну функцию" });
+  }
   const current = await query(`SELECT sf.*,MIN(f.kickoff) first_kickoff FROM season_functions sf
     JOIN fixtures f ON f.round=sf.round WHERE sf.user_id=$1 AND sf.function_code=$2
     GROUP BY sf.user_id,sf.function_code,sf.round,sf.fixture_id,sf.created_at,sf.updated_at`, [req.user.id, code]);
