@@ -50,7 +50,7 @@ function roundControls(rounds = availableRounds()) {
   const current = automaticRound();
   return `<div class="round-controls">
     <button type="button" class="round-arrow" data-round-step="-1" ${index <= 0 ? "disabled" : ""} aria-label="Предыдущий тур">←</button>
-    ${roundControls(rounds)}
+    <select class="round-select" id="round">${rounds.map((item) => `<option value="${item}" ${item === round ? "selected" : ""}>Тур ${item}</option>`).join("")}</select>
     <button type="button" class="round-arrow" data-round-step="1" ${index < 0 || index >= rounds.length - 1 ? "disabled" : ""} aria-label="Следующий тур">→</button>
     <button type="button" class="current-round-button" data-current-round ${round === current ? "disabled" : ""}>Текущий тур · ${current}</button>
   </div>`;
