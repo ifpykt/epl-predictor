@@ -200,9 +200,14 @@ function formatPoints(value) {
 
 function ranking() {
   if (!state.ranking.length) return `<p class="sub">Очки появятся после первых результатов.</p>`;
+  const roundHasResults = state.fixtures.some((fixture) =>
+    Number(fixture.round) === round && fixture.home_score !== null && fixture.away_score !== null);
   return `<div class="ranking-head"><span>Участник</span><span>Тур ${round}</span><span>Всего</span></div>${state.ranking.map((item, index) => {
     const roundPoints = item.rounds?.[String(round)] || { base: 0, bonus: 0, total: 0 };
-    return `<div class="rank"><span>${index + 1}. ${esc(item.name)}<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small></span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
+    const breakdown = roundHasResults
+      ? `<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small>`
+      : "";
+    return `<div class="rank"><span>${index + 1}. ${esc(item.name)}${breakdown}</span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
   }).join("")}`;
 }
 
@@ -210,6 +215,7 @@ function tableView() {
   const rounds = availableRounds();
   const fixtures = state.fixtures.filter((fixture) => Number(fixture.round) === round);
   const participants = state.participants || [];
+  const participantIds = new Set(participants.map((participant) => String(participant.id)));
   return `<div class="toolbar"><div><h2>Общий зачёт</h2><p class="sub">Прогнозы участников открываются после начала каждого матча.</p></div>
       ${roundControls(rounds)}</div>
     <section class="panel side table-ranking">${ranking()}</section>
@@ -217,7 +223,8 @@ function tableView() {
     <section class="prediction-admin-list public-predictions">${fixtures.length ? fixtures.map((fixture) => {
       const started = new Date(fixture.kickoff) <= new Date() && !["POSTPONED", "CANCELLED"].includes(fixture.status);
       const fixturePredictions = started ? state.predictions.filter(
-        (prediction) => String(prediction.fixture_id) === String(fixture.id),
+        (prediction) => String(prediction.fixture_id) === String(fixture.id)
+          && participantIds.has(String(prediction.user_id)),
       ) : [];
       const byUser = new Map(fixturePredictions.map((prediction) => [String(prediction.user_id), prediction]));
       const result = fixture.home_score === null || fixture.away_score === null
@@ -271,8 +278,9 @@ function adminContent() {
   if (adminTab === "log") return logAdminView();
   const next = state.fixtures.find((f) => new Date(f.kickoff) > new Date());
   const inRound = state.fixtures.filter((f) => Number(f.round) === Number(next?.round));
-  const submitted = adminData.users.filter((u) => Number(u.upcoming_predictions) > 0);
-  const missing = adminData.users.filter((u) => u.active && !Number(u.upcoming_predictions));
+  const competitionUsers = adminData.users.filter((user) => user.active && String(user.login).toLowerCase() !== "test");
+  const submitted = competitionUsers.filter((user) => Number(user.upcoming_predictions) > 0);
+  const missing = competitionUsers.filter((user) => user.active && !Number(user.upcoming_predictions));
   return `<div class="stat-grid">
       <article class="stat"><small>Матчей в календаре</small><b>${adminData.summary.fixtures}</b><span>${adminData.summary.pending_results} без результата</span></article>
       <article class="stat"><small>Активных участников</small><b>${adminData.summary.active_players}</b><span>${submitted.length} уже ставили на будущие матчи</span></article>
@@ -288,9 +296,10 @@ function adminContent() {
 function predictionsAdminView() {
   const rounds = availableRounds();
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
-  const users = adminData.users.filter((u) => u.active);
-  const predictions = adminData.predictions || [];
-  const functions = adminData.functions || [];
+  const users = adminData.users.filter((user) => user.active && String(user.login).toLowerCase() !== "test");
+  const userIds = new Set(users.map((user) => String(user.id)));
+  const predictions = (adminData.predictions || []).filter((prediction) => userIds.has(String(prediction.user_id)));
+  const functions = (adminData.functions || []).filter((item) => userIds.has(String(item.user_id)));
   return `<div class="toolbar compact"><div><h3>Прогнозы участников</h3><p class="sub admin-predictions-note">Доступны вам как независимому администратору. Для участников чужие прогнозы до начала матча остаются скрыты.</p></div>
       ${roundControls(rounds)}</div>
     <section class="prediction-admin-list">${fixtures.length ? fixtures.map((fixture) => {
