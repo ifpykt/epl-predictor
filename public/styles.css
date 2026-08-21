@@ -643,6 +643,22 @@ select:focus-visible {
 .prediction-admin-status .open { color: var(--field); }
 .prediction-admin-status .closed { color: var(--muted); }
 
+.table-ranking { margin-bottom: 24px; }
+.public-predictions-head { margin-top: 4px; }
+.public-predictions { padding-bottom: 24px; }
+.predictions-locked { background: rgba(255,255,255,.72); }
+.prediction-count.locked-count { background: #eef1ed; color: var(--muted); }
+.predictions-hidden {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  text-align: center;
+}
+
 @media (max-width: 850px) {
   .login { grid-template-columns: 1fr; }
   .login-visual { min-height: 50vh; padding: 92px 30px 52px; }
