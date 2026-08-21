@@ -5,6 +5,17 @@ let tab = "predictions";
 let adminTab = "overview";
 let adminData = null;
 
+const seasonFunctions = [
+  { code: "DRAW_RAGE", name: "DRAW RAGE", scope: "Весь тур", short: "DR", rule: "За каждую угаданную ничью — +2 очка." },
+  { code: "GOAL_STREAK", name: "GOAL STREAK", scope: "Весь тур", short: "GS", rule: "За каждый фактический гол в пределах вашего прогноза — +0,5 очка." },
+  { code: "CLEAN_SHEET", name: "CLEAN SHEET", scope: "Весь тур", short: "CS", rule: "За каждый угаданный ноль у команды — +2; при 0:0 можно получить +4." },
+  { code: "GAME_TOTAL", name: "GAME TOTAL", scope: "Один матч", short: "GT", match: true, rule: "Фактический тотал матча, если условие точности выполнено." },
+  { code: "ALL_IN", name: "ALL IN", scope: "Один матч", short: "AI", match: true, rule: "Точный счёт удваивает базовые очки тура; ошибка — минус 6." },
+  { code: "AWAY_VICTORY", name: "AWAY VICTORY", scope: "Весь тур", short: "AV", rule: "За каждую угаданную победу гостей — +2 очка." },
+  { code: "UNDERDOGS_PRIME", name: "UNDERDOGS PRIME", scope: "Весь тур · с 15-го", short: "UP", minRound: 15, rule: "Победа команды ниже в таблице — +2; угаданная ничья — +1." },
+  { code: "BTTS", name: "ОЗ", scope: "Весь тур", short: "ОЗ", rule: "Обе забьют в прогнозе и результате — +1,5 очка." },
+];
+
 async function api(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
   const data = await response.json().catch(() => ({}));
@@ -34,7 +45,7 @@ function loginView(error = "") {
       <div class="login-brand">${brandMark()}<span>Футбольная лига прогнозов</span></div>
       <span class="kicker">Сезон 2026/27 · Премьер-лига</span>
       <h1>Лига лысых<br>шарлатанов</h1>
-      <p>Здесь футбольная интуиция встречается с холодным расчётом. Ставьте точный счёт, выбирайте матч ×2 и забирайте первое место.</p>
+      <p>Здесь футбольная интуиция встречается с холодным расчётом. Ставьте точный счёт, выбирайте сезонные функции и забирайте первое место.</p>
       <div class="odds-strip" aria-hidden="true"><span>1</span><i></i><span>X</span><i></i><span>2</span><b>MAKE YOUR PICK</b></div>
     </section>
     <section class="login-form"><form class="card" id="login"><h2>Вход в лигу</h2><p class="sub">Введите логин и пароль, выданные администратором.</p>
@@ -62,6 +73,15 @@ function predictionFor(fixture) {
   return state.predictions.find((p) => String(p.fixture_id) === String(fixture.id) && String(p.user_id) === String(state.user.id));
 }
 
+function functionSelection(code) {
+  return (state.functions || []).find((item) => item.function_code === code && String(item.user_id) === String(state.user.id));
+}
+
+function fixtureLabel(id) {
+  const fixture = state.fixtures.find((item) => String(item.id) === String(id));
+  return fixture ? `${fixture.home_name} — ${fixture.away_name}` : "";
+}
+
 function render() {
   const isAdmin = state.user.role === "admin";
   const participantPasswordForm = state.user.must_change_password && !isAdmin ? passwordView() : "";
@@ -81,22 +101,52 @@ function content() {
   const rounds = [...new Set(state.fixtures.map((f) => Number(f.round)))].sort((a, b) => a - b);
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
   return `<div class="toolbar"><h2>Ваш прогноз</h2><select class="round-select" id="round">${rounds.map((r) => `<option value="${r}" ${r === round ? "selected" : ""}>Тур ${r}</option>`).join("")}</select></div>
+    ${functionsView(fixtures)}
     <div class="grid"><section class="panel">${fixtures.length ? fixtures.map(matchView).join("") : `<div class="empty">Календарь ещё не загружен. Администратору нужно нажать «Получить календарь».</div>`}</section>
     <aside class="panel side"><h3>Лидеры сезона</h3>${ranking()}</aside></div>`;
+}
+
+function functionsView(fixtures) {
+  const firstKickoff = fixtures[0] ? Math.min(...fixtures.map((item) => new Date(item.kickoff).getTime())) : 0;
+  const roundLocked = !firstKickoff || firstKickoff <= Date.now();
+  const used = seasonFunctions.filter((item) => functionSelection(item.code)).length;
+  return `<section class="panel functions-panel">
+    <header class="functions-head"><div><p class="eyebrow">8 функций на сезон</p><h3>Сезонные функции</h3><p class="sub">Каждую можно применить только в одном туре. Выбор блокируется с началом первого матча тура.</p></div><b>${used} / 8</b></header>
+    <div class="function-grid">${seasonFunctions.map((item) => {
+      const selected = functionSelection(item.code);
+      const selectedHere = Number(selected?.round) === round;
+      const unavailable = roundLocked || round < Number(item.minRound || 1);
+      const selectedFixture = selected?.fixture_id ? fixtureLabel(selected.fixture_id) : "";
+      return `<article class="function-card ${selectedHere ? "active" : ""} ${selected && !selectedHere ? "used" : ""}" data-function-card="${item.code}">
+        <div class="function-title"><span>${item.short}</span><div><b>${item.name}</b><small>${item.scope}</small></div></div>
+        <p>${item.rule}</p>
+        ${selected ? `<div class="function-used">Выбрано: тур ${selected.round}${selectedFixture ? ` · ${esc(selectedFixture)}` : ""}</div>` : ""}
+        ${item.match && (!selected || selectedHere) ? `<select class="function-match" ${unavailable ? "disabled" : ""}><option value="">Выберите матч</option>${fixtures.map((fixture) => `<option value="${fixture.id}" ${String(selected?.fixture_id) === String(fixture.id) ? "selected" : ""}>${esc(fixture.home_name)} — ${esc(fixture.away_name)}</option>`).join("")}</select>` : ""}
+        ${!selected || selectedHere ? `<button class="${selectedHere ? "function-cancel" : "function-activate"}" data-function="${item.code}" ${unavailable ? "disabled" : ""}>${selectedHere ? "Отменить выбор" : round < Number(item.minRound || 1) ? "Доступно с 15-го тура" : roundLocked ? "Тур уже начался" : `Применить в туре ${round}`}</button>` : `<span class="function-locked">Используется один раз за сезон</span>`}
+      </article>`;
+    }).join("")}</div>
+    <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. Бонусные очки показываются отдельно и прибавляются к базе.</p><p><b>GAME TOTAL:</b> согласно приведённым примерам начисляется весь фактический тотал, если хотя бы у одной забившей команды прогноз отличается не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
+  </section>`;
 }
 
 function matchView(fixture) {
   const p = predictionFor(fixture);
   const locked = new Date(fixture.kickoff) <= new Date();
+  const potential = seasonFunctions.filter((item) => {
+    const selection = functionSelection(item.code);
+    if (!selection || Number(selection.round) !== Number(fixture.round) || !p) return false;
+    if (item.match) return String(selection.fixture_id) === String(fixture.id);
+    return (state.functionPotential?.[item.code] || []).some((id) => String(id) === String(fixture.id));
+  });
   return `<article class="match ${locked ? "locked" : ""}" data-fixture="${fixture.id}">
     <div class="team home"><span>${esc(fixture.home_name)}</span><img class="crest" src="${esc(fixture.home_crest)}" alt=""></div>
     <div class="score"><div><input data-side="home" type="number" min="0" max="30" value="${p?.home_score ?? ""}" ${locked ? "disabled" : ""}><small>${new Date(fixture.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small></div><b>:</b><input data-side="away" type="number" min="0" max="30" value="${p?.away_score ?? ""}" ${locked ? "disabled" : ""}></div>
     <div class="team"><img class="crest" src="${esc(fixture.away_crest)}" alt=""><span>${esc(fixture.away_name)}</span></div>
-    <button class="bonus ${p?.bonus ? "on" : ""}" ${locked || state.settings?.joker_enabled === false ? "disabled" : ""} title="${state.settings?.joker_enabled === false ? "Матч ×2 отключён правилами" : "Удвоить очки за этот матч"}">×2</button></article>`;
+    <div class="match-functions">${potential.map((item) => `<span title="${esc(item.rule)}">${item.short}</span>`).join("")}</div></article>`;
 }
 
 function ranking() {
-  return state.ranking.length ? state.ranking.map((x, i) => `<div class="rank"><span>${i + 1}. ${esc(x.name)}</span><b>${x.total}</b></div>`).join("") : `<p class="sub">Очки появятся после первых результатов.</p>`;
+  return state.ranking.length ? state.ranking.map((x, i) => `<div class="rank"><span>${i + 1}. ${esc(x.name)}<small>${x.bonus ? `База ${x.base} · функции ${x.bonus > 0 ? "+" : ""}${x.bonus}` : ""}</small></span><b>${x.total}</b></div>`).join("") : `<p class="sub">Очки появятся после первых результатов.</p>`;
 }
 
 function tableView() {
@@ -145,6 +195,7 @@ function predictionsAdminView() {
   const fixtures = state.fixtures.filter((f) => Number(f.round) === round);
   const users = adminData.users.filter((u) => u.active);
   const predictions = adminData.predictions || [];
+  const functions = adminData.functions || [];
   return `<div class="toolbar compact"><div><h3>Прогнозы участников</h3><p class="sub admin-predictions-note">Доступны вам как независимому администратору. Для участников чужие прогнозы до начала матча остаются скрыты.</p></div>
       <select class="round-select" id="round">${rounds.map((r)=>`<option value="${r}" ${r===round?"selected":""}>Тур ${r}</option>`).join("")}</select></div>
     <section class="prediction-admin-list">${fixtures.length ? fixtures.map((fixture) => {
@@ -156,7 +207,9 @@ function predictionsAdminView() {
           <span class="prediction-count ${fixturePredictions.length === users.length && users.length ? "complete" : ""}">${fixturePredictions.length} из ${users.length}</span></header>
         <div class="prediction-admin-grid">${users.length ? users.map((user) => {
           const prediction = byUser.get(String(user.id));
-          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(user.display_name)}</span>${prediction ? `<b>${prediction.home_score}:${prediction.away_score}${prediction.bonus ? `<em>×2</em>` : ""}</b>` : `<small>Нет прогноза</small>`}</div>`;
+          const userFunctions = functions.filter((item) => String(item.user_id) === String(user.id) && Number(item.round) === Number(fixture.round)
+            && (!item.fixture_id || String(item.fixture_id) === String(fixture.id)));
+          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(user.display_name)}${userFunctions.length ? `<small class="admin-function-tags">${userFunctions.map((item) => seasonFunctions.find((x) => x.code === item.function_code)?.short || item.function_code).join(" · ")}</small>` : ""}</span>${prediction ? `<b>${prediction.home_score}:${prediction.away_score}</b>` : `<small>Нет прогноза</small>`}</div>`;
         }).join("") : `<div class="empty">Активных участников пока нет.</div>`}</div>
         <footer class="prediction-admin-status"><span class="${started ? "closed" : "open"}">${started ? "Матч начался" : "Приём открыт"}</span>${fixture.home_score === null || fixture.away_score === null ? "" : `<b>Результат ${fixture.home_score}:${fixture.away_score}</b>`}</footer>
       </article>`;
@@ -197,7 +250,7 @@ function rulesAdminView() {
   return `<form class="panel settings-form" id="rules-form"><div><p class="eyebrow">Сезон и начисление</p><h3>Правила лиги</h3><p class="sub">Изменение очков после старта требует отдельного подтверждения и фиксируется в журнале.</p></div>
     <label class="field"><span>Название сезона</span><input name="seasonName" value="${esc(s.season_name)}" required></label>
     <div class="points-grid"><label class="field"><span>Точный счёт</span><input name="exactPoints" type="number" min="0" max="20" value="${s.exact_points}"></label><label class="field"><span>Разница мячей</span><input name="differencePoints" type="number" min="0" max="20" value="${s.difference_points}"></label><label class="field"><span>Исход</span><input name="outcomePoints" type="number" min="0" max="20" value="${s.outcome_points}"></label></div>
-    <label class="check"><input name="jokerEnabled" type="checkbox" ${s.joker_enabled?"checked":""}><span>Разрешить один матч ×2 в каждом туре</span></label>
+    <div class="rules-note"><b>Сезонные функции включены</b><span>Каждый участник может применить каждую из восьми функций один раз за сезон. Выбор закрывается с началом тура.</span></div>
     <label class="field"><span>Текст правил для участников</span><textarea name="rulesText" rows="6">${esc(s.rules_text)}</textarea></label>
     <label class="check danger-check"><input name="confirmRecalculate" type="checkbox"><span>Подтверждаю пересчёт сезона, если матчи уже начались</span></label><button class="primary">Сохранить правила</button></form>`;
 }
@@ -219,11 +272,27 @@ function bind() {
       const homeScore = row.querySelector('[data-side="home"]').value;
       const awayScore = row.querySelector('[data-side="away"]').value;
       if (homeScore === "" || awayScore === "") return;
-      await api(`/api/predictions/${row.dataset.fixture}`, { method: "PUT", body: JSON.stringify({ homeScore, awayScore, bonus: row.querySelector(".bonus").classList.contains("on") }) });
+      await api(`/api/predictions/${row.dataset.fixture}`, { method: "PUT", body: JSON.stringify({ homeScore, awayScore }) });
       state = await api("/api/state");
+      render();
     };
     row.querySelectorAll("input").forEach((input) => input.onchange = () => save().catch((e) => alert(e.message)));
-    row.querySelector(".bonus").onclick = async (event) => { document.querySelectorAll(".bonus").forEach((b) => b.classList.remove("on")); event.currentTarget.classList.add("on"); await save(); render(); };
+  });
+  document.querySelectorAll(".function-activate").forEach((button) => button.onclick = async () => {
+    const card = button.closest("[data-function-card]");
+    const fixtureId = card.querySelector(".function-match")?.value || null;
+    if (card.querySelector(".function-match") && !fixtureId) return alert("Сначала выберите матч");
+    try {
+      await api(`/api/functions/${button.dataset.function}`, { method: "PUT", body: JSON.stringify({ round, fixtureId }) });
+      state = await api("/api/state"); render();
+    } catch (e) { alert(e.message); }
+  });
+  document.querySelectorAll(".function-cancel").forEach((button) => button.onclick = async () => {
+    if (!confirm("Отменить выбор функции до начала тура?")) return;
+    try {
+      await api(`/api/functions/${button.dataset.function}`, { method: "DELETE" });
+      state = await api("/api/state"); render();
+    } catch (e) { alert(e.message); }
   });
   const sync = document.querySelector("#sync");
   if (sync) sync.onclick = async () => { sync.disabled = true; try { const r = await api("/api/admin/sync", { method: "POST" }); alert(`Обновлено матчей: ${r.updated}`); adminData=null; await load(); } catch (e) { alert(e.message); } finally { sync.disabled = false; } };
@@ -246,7 +315,7 @@ function bind() {
     };
   });
   const rules=document.querySelector("#rules-form");
-  if(rules)rules.onsubmit=async(event)=>{event.preventDefault();const values=Object.fromEntries(new FormData(rules));values.jokerEnabled=rules.jokerEnabled.checked;values.confirmRecalculate=rules.confirmRecalculate.checked;try{await api("/api/admin/settings",{method:"PATCH",body:JSON.stringify(values)});alert("Правила сохранены");adminData=null;tab="admin";adminTab="rules";await load();}catch(e){alert(e.message);}};
+  if(rules)rules.onsubmit=async(event)=>{event.preventDefault();const values=Object.fromEntries(new FormData(rules));values.jokerEnabled=false;values.confirmRecalculate=rules.confirmRecalculate.checked;try{await api("/api/admin/settings",{method:"PATCH",body:JSON.stringify(values)});alert("Правила сохранены");adminData=null;tab="admin";adminTab="rules";await load();}catch(e){alert(e.message);}};
   const password = document.querySelector("#password");
   if (password) password.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/change-password", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(password))) }); alert("Пароль изменён"); await load(); } catch (e) { alert(e.message); } };
 }

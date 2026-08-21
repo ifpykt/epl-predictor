@@ -43,6 +43,22 @@ CREATE TABLE IF NOT EXISTS predictions (
   PRIMARY KEY (user_id, fixture_id)
 );
 
+CREATE TABLE IF NOT EXISTS season_functions (
+  user_id BIGINT NOT NULL,
+  function_code TEXT NOT NULL CHECK (function_code IN (
+    'DRAW_RAGE','GOAL_STREAK','CLEAN_SHEET','GAME_TOTAL',
+    'ALL_IN','AWAY_VICTORY','UNDERDOGS_PRIME','BTTS'
+  )),
+  round INTEGER NOT NULL CHECK (round BETWEEN 1 AND 38),
+  fixture_id BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, function_code),
+  CHECK ((function_code IN ('GAME_TOTAL','ALL_IN') AND fixture_id IS NOT NULL)
+    OR (function_code NOT IN ('GAME_TOTAL','ALL_IN') AND fixture_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS season_functions_round_idx ON season_functions(round,user_id);
+
 CREATE TABLE IF NOT EXISTS league_settings (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   season_name TEXT NOT NULL DEFAULT 'АПЛ 2026/27',

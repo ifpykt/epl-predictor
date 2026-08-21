@@ -15,6 +15,11 @@ const isProduction = process.env.NODE_ENV === "production";
 const cookieName = "apl_session";
 const delaStatuses = new Set(["new", "in_progress", "control", "done"]);
 const delaPriorities = new Set(["normal", "high", "critical"]);
+const seasonFunctionCodes = new Set([
+  "DRAW_RAGE", "GOAL_STREAK", "CLEAN_SHEET", "GAME_TOTAL",
+  "ALL_IN", "AWAY_VICTORY", "UNDERDOGS_PRIME", "BTTS",
+]);
+const matchFunctionCodes = new Set(["GAME_TOTAL", "ALL_IN"]);
 
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -86,7 +91,111 @@ function points(prediction, fixture, settings = { exact_points: 3, difference_po
   if (prediction.pred_home === fixture.home_score && prediction.pred_away === fixture.away_score) value = settings.exact_points;
   else if (prediction.pred_home - prediction.pred_away === fixture.home_score - fixture.away_score) value = settings.difference_points;
   else if (Math.sign(prediction.pred_home - prediction.pred_away) === Math.sign(fixture.home_score - fixture.away_score)) value = settings.outcome_points;
-  return value * (prediction.bonus ? 2 : 1);
+  return value;
+}
+
+function standingsBeforeRound(fixtures, targetRound) {
+  const rows = new Map();
+  const team = (name) => {
+    if (!rows.has(name)) rows.set(name, { name, points: 0, gd: 0, gf: 0 });
+    return rows.get(name);
+  };
+  for (const fixture of fixtures) {
+    if (Number(fixture.round) >= Number(targetRound) || fixture.home_score === null || fixture.away_score === null) continue;
+    const home = team(fixture.home_name);
+    const away = team(fixture.away_name);
+    home.gf += fixture.home_score; away.gf += fixture.away_score;
+    home.gd += fixture.home_score - fixture.away_score;
+    away.gd += fixture.away_score - fixture.home_score;
+    if (fixture.home_score > fixture.away_score) home.points += 3;
+    else if (fixture.home_score < fixture.away_score) away.points += 3;
+    else { home.points += 1; away.points += 1; }
+  }
+  return new Map([...rows.values()]
+    .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name, "ru"))
+    .map((item, index) => [item.name, index + 1]));
+}
+
+function selectionBonus(selection, predictions, fixtures, settings) {
+  const roundFixtures = fixtures.filter((fixture) => Number(fixture.round) === Number(selection.round));
+  const fixtureMap = new Map(roundFixtures.map((fixture) => [String(fixture.id), fixture]));
+  const roundPredictions = predictions.filter((prediction) => fixtureMap.has(String(prediction.fixture_id)));
+  const completed = roundPredictions.filter((prediction) => {
+    const fixture = fixtureMap.get(String(prediction.fixture_id));
+    return fixture.home_score !== null && fixture.away_score !== null;
+  });
+  const code = selection.function_code;
+  if (code === "DRAW_RAGE") return completed.reduce((sum, p) => {
+    const f = fixtureMap.get(String(p.fixture_id));
+    return sum + (p.home_score === p.away_score && f.home_score === f.away_score ? 2 : 0);
+  }, 0);
+  if (code === "GOAL_STREAK") return completed.reduce((sum, p) => {
+    const f = fixtureMap.get(String(p.fixture_id));
+    return sum + (Math.min(p.home_score, f.home_score) + Math.min(p.away_score, f.away_score)) * 0.5;
+  }, 0);
+  if (code === "CLEAN_SHEET") return completed.reduce((sum, p) => {
+    const f = fixtureMap.get(String(p.fixture_id));
+    return sum + (p.home_score === 0 && f.home_score === 0 ? 2 : 0) + (p.away_score === 0 && f.away_score === 0 ? 2 : 0);
+  }, 0);
+  if (code === "AWAY_VICTORY") return completed.reduce((sum, p) => {
+    const f = fixtureMap.get(String(p.fixture_id));
+    return sum + (p.home_score < p.away_score && f.home_score < f.away_score ? 2 : 0);
+  }, 0);
+  if (code === "BTTS") return completed.reduce((sum, p) => {
+    const f = fixtureMap.get(String(p.fixture_id));
+    return sum + (p.home_score > 0 && p.away_score > 0 && f.home_score > 0 && f.away_score > 0 ? 1.5 : 0);
+  }, 0);
+  if (code === "UNDERDOGS_PRIME") {
+    if (Number(selection.round) < 15) return 0;
+    const positions = standingsBeforeRound(fixtures, selection.round);
+    return completed.reduce((sum, p) => {
+      const f = fixtureMap.get(String(p.fixture_id));
+      const homePos = positions.get(f.home_name);
+      const awayPos = positions.get(f.away_name);
+      if (!homePos || !awayPos || homePos === awayPos) return sum;
+      const underdogHome = homePos > awayPos;
+      const predictedUnderdogWin = underdogHome ? p.home_score > p.away_score : p.away_score > p.home_score;
+      const actualUnderdogWin = underdogHome ? f.home_score > f.away_score : f.away_score > f.home_score;
+      if (predictedUnderdogWin && actualUnderdogWin) return sum + 2;
+      if (p.home_score === p.away_score && f.home_score === f.away_score) return sum + 1;
+      return sum;
+    }, 0);
+  }
+  const prediction = roundPredictions.find((p) => String(p.fixture_id) === String(selection.fixture_id));
+  const fixture = fixtureMap.get(String(selection.fixture_id));
+  if (!prediction || !fixture || fixture.home_score === null || fixture.away_score === null) return 0;
+  if (code === "GAME_TOTAL") {
+    const qualifyingScorer = (fixture.home_score > 0 && Math.abs(prediction.home_score - fixture.home_score) <= 2)
+      || (fixture.away_score > 0 && Math.abs(prediction.away_score - fixture.away_score) <= 2);
+    return qualifyingScorer ? fixture.home_score + fixture.away_score : 0;
+  }
+  if (code === "ALL_IN") {
+    const exact = prediction.home_score === fixture.home_score && prediction.away_score === fixture.away_score;
+    if (!exact) return -6;
+    return roundPredictions.reduce((sum, p) => sum + (points(
+      { pred_home: p.home_score, pred_away: p.away_score }, fixtureMap.get(String(p.fixture_id)), settings,
+    ) || 0), 0);
+  }
+  return 0;
+}
+
+function predictionPotential(code, prediction, fixture, fixtures, round) {
+  if (!prediction) return false;
+  if (code === "GOAL_STREAK") return true;
+  if (code === "DRAW_RAGE") return prediction.home_score === prediction.away_score;
+  if (code === "CLEAN_SHEET") return prediction.home_score === 0 || prediction.away_score === 0;
+  if (code === "AWAY_VICTORY") return prediction.home_score < prediction.away_score;
+  if (code === "BTTS") return prediction.home_score > 0 && prediction.away_score > 0;
+  if (code === "UNDERDOGS_PRIME") {
+    const positions = standingsBeforeRound(fixtures, round);
+    const homePos = positions.get(fixture.home_name);
+    const awayPos = positions.get(fixture.away_name);
+    if (!homePos || !awayPos || homePos === awayPos) return false;
+    const underdogHome = homePos > awayPos;
+    return prediction.home_score === prediction.away_score
+      || (underdogHome ? prediction.home_score > prediction.away_score : prediction.away_score > prediction.home_score);
+  }
+  return false;
 }
 
 async function audit(user, action, targetType = null, targetId = null, details = {}) {
@@ -119,13 +228,14 @@ app.post("/api/logout", auth, async (req, res) => {
 });
 
 app.get("/api/state", auth, async (req, res) => {
-  const [fixtures, predictions, allPredictions, users, settings] = await Promise.all([
+  const [fixtures, predictions, allPredictions, users, settings, functions] = await Promise.all([
     query("SELECT * FROM fixtures ORDER BY round,kickoff"),
     query(`SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id
            JOIN fixtures f ON f.id=p.fixture_id WHERE p.user_id=$1 OR f.kickoff<=NOW()`, [req.user.id]),
     query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE"),
     query("SELECT id,login,display_name,role,active,must_change_password,last_login_at FROM users ORDER BY id"),
     query("SELECT * FROM league_settings WHERE id=1"),
+    query("SELECT * FROM season_functions ORDER BY created_at"),
   ]);
   const ranking = new Map();
   const fixtureMap = new Map(fixtures.rows.map((item) => [String(item.id), item]));
@@ -134,7 +244,38 @@ app.get("/api/state", auth, async (req, res) => {
       { pred_home: prediction.home_score, pred_away: prediction.away_score, bonus: prediction.bonus },
       fixtureMap.get(String(prediction.fixture_id)), settings.rows[0],
     );
-    if (result !== null) ranking.set(prediction.display_name, (ranking.get(prediction.display_name) || 0) + result);
+    if (result !== null) {
+      const item = ranking.get(prediction.display_name) || { name: prediction.display_name, base: 0, bonus: 0, total: 0 };
+      item.base += result;
+      item.total += result;
+      ranking.set(prediction.display_name, item);
+    }
+  }
+  for (const selection of functions.rows) {
+    const userPredictions = allPredictions.rows.filter((p) => String(p.user_id) === String(selection.user_id));
+    const user = userPredictions[0]?.display_name || users.rows.find((u) => String(u.id) === String(selection.user_id))?.display_name;
+    if (!user) continue;
+    const bonus = selectionBonus(selection, userPredictions, fixtures.rows, settings.rows[0]);
+    const item = ranking.get(user) || { name: user, base: 0, bonus: 0, total: 0 };
+    item.bonus += bonus;
+    item.total += bonus;
+    ranking.set(user, item);
+  }
+  const ownFunctions = functions.rows.filter((item) => String(item.user_id) === String(req.user.id));
+  const ownPredictions = predictions.rows.filter((item) => String(item.user_id) === String(req.user.id));
+  const functionPotential = {};
+  for (const selection of ownFunctions) {
+    if (matchFunctionCodes.has(selection.function_code)) continue;
+    functionPotential[selection.function_code] = fixtures.rows
+      .filter((fixture) => Number(fixture.round) === Number(selection.round))
+      .filter((fixture) => predictionPotential(
+        selection.function_code,
+        ownPredictions.find((p) => String(p.fixture_id) === String(fixture.id)),
+        fixture,
+        fixtures.rows,
+        selection.round,
+      ))
+      .map((fixture) => fixture.id);
   }
   res.json({
     user: req.user,
@@ -143,8 +284,48 @@ app.get("/api/state", auth, async (req, res) => {
     predictions: predictions.rows,
     users: req.user.role === "admin" ? users.rows : [],
     settings: settings.rows[0],
-    ranking: [...ranking].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
+    functions: req.user.role === "admin" ? functions.rows : ownFunctions,
+    functionPotential,
+    ranking: [...ranking.values()].sort((a, b) => b.total - a.total),
   });
+});
+
+app.put("/api/functions/:code", auth, async (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const round = Number(req.body.round);
+  const fixtureId = req.body.fixtureId ? Number(req.body.fixtureId) : null;
+  if (!seasonFunctionCodes.has(code) || !Number.isInteger(round) || round < 1 || round > 38) {
+    return res.status(400).json({ error: "Проверьте функцию и тур" });
+  }
+  if (code === "UNDERDOGS_PRIME" && round < 15) return res.status(409).json({ error: "UNDERDOGS PRIME доступна с 15-го тура" });
+  const fixtures = await query("SELECT id,round,kickoff FROM fixtures WHERE round=$1 ORDER BY kickoff", [round]);
+  if (!fixtures.rows.length) return res.status(404).json({ error: "В этом туре нет матчей" });
+  if (new Date(fixtures.rows[0].kickoff) <= new Date()) return res.status(409).json({ error: "Тур уже начался — функцию выбрать или изменить нельзя" });
+  if (matchFunctionCodes.has(code) && !fixtures.rows.some((f) => String(f.id) === String(fixtureId))) {
+    return res.status(400).json({ error: "Выберите матч этого тура" });
+  }
+  const current = await query(`SELECT sf.*,MIN(f.kickoff) first_kickoff FROM season_functions sf
+    JOIN fixtures f ON f.round=sf.round WHERE sf.user_id=$1 AND sf.function_code=$2
+    GROUP BY sf.user_id,sf.function_code,sf.round,sf.fixture_id,sf.created_at,sf.updated_at`, [req.user.id, code]);
+  if (current.rows[0] && new Date(current.rows[0].first_kickoff) <= new Date()) {
+    return res.status(409).json({ error: "Эта функция уже использована и заблокирована" });
+  }
+  await query(`INSERT INTO season_functions(user_id,function_code,round,fixture_id)
+    VALUES($1,$2,$3,$4) ON CONFLICT(user_id,function_code) DO UPDATE SET
+    round=EXCLUDED.round,fixture_id=EXCLUDED.fixture_id,updated_at=NOW()`,
+  [req.user.id, code, round, matchFunctionCodes.has(code) ? fixtureId : null]);
+  res.json({ ok: true });
+});
+
+app.delete("/api/functions/:code", auth, async (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const current = await query(`SELECT sf.*,MIN(f.kickoff) first_kickoff FROM season_functions sf
+    JOIN fixtures f ON f.round=sf.round WHERE sf.user_id=$1 AND sf.function_code=$2
+    GROUP BY sf.user_id,sf.function_code,sf.round,sf.fixture_id,sf.created_at,sf.updated_at`, [req.user.id, code]);
+  if (!current.rows[0]) return res.json({ ok: true });
+  if (new Date(current.rows[0].first_kickoff) <= new Date()) return res.status(409).json({ error: "Использованную функцию удалить нельзя" });
+  await query("DELETE FROM season_functions WHERE user_id=$1 AND function_code=$2", [req.user.id, code]);
+  res.json({ ok: true });
 });
 
 app.get("/api/dela/state", auth, delaAccess, async (req, res) => {
@@ -231,25 +412,14 @@ app.put("/api/predictions/:fixtureId", auth, async (req, res) => {
   const fixture = rows[0];
   if (!fixture) return res.status(404).json({ error: "Матч не найден" });
   if (new Date(fixture.kickoff) <= new Date()) return res.status(409).json({ error: "Матч уже начался" });
-  if (req.body.bonus) {
-    const { rows: settings } = await query("SELECT joker_enabled FROM league_settings WHERE id=1");
-    if (!settings[0]?.joker_enabled) return res.status(409).json({ error: "Матч ×2 отключён в правилах лиги" });
-  }
   await transaction(async (client) => {
-    if (req.body.bonus) {
-      await client.query(
-        `UPDATE predictions SET bonus=FALSE WHERE user_id=$1 AND fixture_id IN
-         (SELECT id FROM fixtures WHERE round=$2)`,
-        [req.user.id, fixture.round],
-      );
-    }
     await client.query(
       `INSERT INTO predictions(user_id,fixture_id,home_score,away_score,bonus)
        VALUES($1,$2,$3,$4,$5)
        ON CONFLICT(user_id,fixture_id) DO UPDATE SET
        home_score=EXCLUDED.home_score,away_score=EXCLUDED.away_score,
        bonus=EXCLUDED.bonus,updated_at=NOW()`,
-      [req.user.id, fixtureId, home, away, Boolean(req.body.bonus)],
+      [req.user.id, fixtureId, home, away, false],
     );
   });
   res.json({ ok: true });
@@ -297,7 +467,7 @@ app.post("/api/admin/users/:id/reset-password", auth, admin, async (req, res) =>
 });
 
 app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
-  const [summary, users, predictions, logs, settings] = await Promise.all([
+  const [summary, users, predictions, logs, settings, functions] = await Promise.all([
     query(`SELECT
       (SELECT COUNT(*) FROM fixtures)::int fixtures,
       (SELECT COUNT(*) FROM fixtures WHERE home_score IS NULL OR away_score IS NULL)::int pending_results,
@@ -315,6 +485,7 @@ app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
       ORDER BY p.fixture_id,u.display_name`),
     query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100"),
     query("SELECT * FROM league_settings WHERE id=1"),
+    query("SELECT sf.*,u.display_name FROM season_functions sf JOIN users u ON u.id=sf.user_id ORDER BY sf.round,u.display_name"),
   ]);
   res.json({
     summary: summary.rows[0],
@@ -322,6 +493,7 @@ app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
     predictions: predictions.rows,
     logs: logs.rows,
     settings: settings.rows[0],
+    functions: functions.rows,
   });
 });
 
