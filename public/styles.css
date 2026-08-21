@@ -507,6 +507,21 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.match-actions { display: grid; justify-items: center; gap: 5px; }
+
+.bonus {
+  width: 48px;
+  padding: 9px 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.bonus:hover:not(:disabled) { border-color: var(--field); color: var(--field); }
+.bonus.on { border-color: var(--lime); background: var(--lime); color: var(--forest); }
+
 .match-functions { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
 .match-functions span { display: grid; min-width: 27px; height: 22px; padding: 0 4px; place-items: center; border-radius: 6px; background: var(--lime); color: var(--forest); font-size: 8px; font-weight: 950; }
 .locked { opacity: .6; }
@@ -666,6 +681,7 @@ select:focus-visible {
   .score input { width: 44px; height: 44px; }
   .score { padding-bottom: 15px; }
   .score small { font-size: 8px; line-height: 1.15; }
+  .bonus { width: 40px; padding: 8px 3px; font-size: 12px; }
   .hero { padding: 36px 14px 28px; }
   .hero::before { right: -180px; }
   .matchday { gap: 12px; }
