@@ -273,7 +273,7 @@ function adminContent() {
   if (adminTab === "log") return logAdminView();
   const next = state.fixtures.find((f) => new Date(f.kickoff) > new Date());
   const inRound = state.fixtures.filter((f) => Number(f.round) === Number(next?.round));
-  const competitionUsers = adminData.users.filter((user) => String(user.login).toLowerCase() !== "test");
+  const competitionUsers = adminData.users.filter((user) => user.active && String(user.login).toLowerCase() !== "test");
   const submitted = competitionUsers.filter((user) => Number(user.upcoming_predictions) > 0);
   const missing = competitionUsers.filter((user) => user.active && !Number(user.upcoming_predictions));
   return `<div class="stat-grid">
