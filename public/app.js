@@ -134,13 +134,24 @@ function functionsView(fixtures) {
         ${!selected || selectedHere ? `<button class="${selectedHere ? "function-cancel" : "function-activate"}" data-function="${item.code}" ${unavailable ? "disabled" : ""}>${actionLabel}</button>` : `<span class="function-locked">Используется один раз за сезон</span>`}
       </article>`;
     }).join("")}</div>
-    <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. Бонусные очки показываются отдельно и прибавляются к базе.</p><p><b>GAME TOTAL:</b> начисляется весь фактический тотал, если прогноз по голам каждой команды отклоняется от результата не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
+    <details class="function-rules"><summary>Как считаются функции и базовые очки</summary><p><b>База:</b> точный счёт — 3, разница — 2, исход — 1. В каждом туре можно выбрать один матч ×2 и удвоить базовые очки за него. ×2 не относится к восьми сезонным функциям.</p><p><b>GAME TOTAL:</b> начисляется весь фактический тотал, если прогноз по голам каждой команды отклоняется от результата не более чем на два гола.</p><p><b>ALL IN:</b> при точном счёте выбранного матча базовые очки всего тура удваиваются; иначе начисляется −6. Другие функции не удваиваются.</p><p><b>UNDERDOGS PRIME:</b> положение команд фиксируется по таблице на начало тура.</p></details>
   </section>`;
 }
 
 function matchView(fixture) {
   const p = predictionFor(fixture);
   const locked = new Date(fixture.kickoff) <= new Date();
+  const roundBonus = state.predictions.find((item) => {
+    if (!item.bonus || String(item.user_id) !== String(state.user.id)) return false;
+    const selectedFixture = state.fixtures.find((entry) => String(entry.id) === String(item.fixture_id));
+    return Number(selectedFixture?.round) === Number(fixture.round);
+  });
+  const roundBonusFixture = state.fixtures.find((item) => String(item.id) === String(roundBonus?.fixture_id));
+  const roundBonusLocked = roundBonusFixture && new Date(roundBonusFixture.kickoff) <= new Date();
+  const bonusDisabled = locked || state.settings?.joker_enabled === false || (roundBonusLocked && !p?.bonus);
+  const bonusTitle = state.settings?.joker_enabled === false ? "Матч ×2 отключён правилами"
+    : roundBonusLocked && !p?.bonus ? "Матч ×2 в этом туре уже начался"
+      : p?.bonus ? "Отменить выбор ×2" : "Удвоить базовые очки за этот матч";
   const potential = seasonFunctions.filter((item) => {
     const selection = functionSelection(item.code);
     if (!selection || Number(selection.round) !== Number(fixture.round) || !p) return false;
@@ -151,7 +162,7 @@ function matchView(fixture) {
     <div class="team home"><span>${esc(fixture.home_name)}</span><img class="crest" src="${esc(fixture.home_crest)}" alt=""></div>
     <div class="score"><div><input data-side="home" type="number" min="0" max="30" value="${p?.home_score ?? ""}" ${locked ? "disabled" : ""}><small>${new Date(fixture.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small></div><b>:</b><input data-side="away" type="number" min="0" max="30" value="${p?.away_score ?? ""}" ${locked ? "disabled" : ""}></div>
     <div class="team"><img class="crest" src="${esc(fixture.away_crest)}" alt=""><span>${esc(fixture.away_name)}</span></div>
-    <div class="match-functions">${potential.map((item) => `<span title="${esc(item.rule)}">${item.short}</span>`).join("")}</div></article>`;
+    <div class="match-actions"><button class="bonus ${p?.bonus ? "on" : ""}" ${bonusDisabled ? "disabled" : ""} title="${esc(bonusTitle)}">×2</button><div class="match-functions">${potential.map((item) => `<span title="${esc(item.rule)}">${item.short}</span>`).join("")}</div></div></article>`;
 }
 
 function ranking() {
@@ -280,12 +291,31 @@ function bind() {
     const save = async () => {
       const homeScore = row.querySelector('[data-side="home"]').value;
       const awayScore = row.querySelector('[data-side="away"]').value;
-      if (homeScore === "" || awayScore === "") return;
-      await api(`/api/predictions/${row.dataset.fixture}`, { method: "PUT", body: JSON.stringify({ homeScore, awayScore }) });
+      if (homeScore === "" || awayScore === "") return false;
+      await api(`/api/predictions/${row.dataset.fixture}`, {
+        method: "PUT",
+        body: JSON.stringify({ homeScore, awayScore, bonus: row.querySelector(".bonus").classList.contains("on") }),
+      });
       state = await api("/api/state");
       render();
+      return true;
     };
     row.querySelectorAll("input").forEach((input) => input.onchange = () => save().catch((e) => alert(e.message)));
+    row.querySelector(".bonus").onclick = async (event) => {
+      const homeScore = row.querySelector('[data-side="home"]').value;
+      const awayScore = row.querySelector('[data-side="away"]').value;
+      if (homeScore === "" || awayScore === "") return alert("Сначала укажите счёт");
+      const button = event.currentTarget;
+      const enabling = !button.classList.contains("on");
+      if (enabling) document.querySelectorAll(".bonus").forEach((item) => item.classList.remove("on"));
+      button.classList.toggle("on", enabling);
+      try { await save(); }
+      catch (error) {
+        state = await api("/api/state");
+        render();
+        alert(error.message);
+      }
+    };
   });
   document.querySelectorAll(".function-activate").forEach((button) => button.onclick = async () => {
     const card = button.closest("[data-function-card]");
