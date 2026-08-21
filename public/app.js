@@ -170,7 +170,40 @@ function ranking() {
 }
 
 function tableView() {
-  return `<div class="toolbar"><h2>Общий зачёт</h2></div><section class="panel side">${ranking()}</section>`;
+  const rounds = [...new Set(state.fixtures.map((fixture) => Number(fixture.round)))].sort((a, b) => a - b);
+  const fixtures = state.fixtures.filter((fixture) => Number(fixture.round) === round);
+  const participants = state.participants || [];
+  return `<div class="toolbar"><div><h2>Общий зачёт</h2><p class="sub">Прогнозы участников открываются после начала каждого матча.</p></div>
+      <select class="round-select" id="round">${rounds.map((item) => `<option value="${item}" ${item === round ? "selected" : ""}>Тур ${item}</option>`).join("")}</select></div>
+    <section class="panel side table-ranking">${ranking()}</section>
+    <div class="toolbar compact public-predictions-head"><div><h3>Прогнозы участников · тур ${round}</h3><p class="sub">До стартового свистка чужие прогнозы скрыты.</p></div></div>
+    <section class="prediction-admin-list public-predictions">${fixtures.length ? fixtures.map((fixture) => {
+      const started = new Date(fixture.kickoff) <= new Date() && !["POSTPONED", "CANCELLED"].includes(fixture.status);
+      const fixturePredictions = started ? state.predictions.filter(
+        (prediction) => String(prediction.fixture_id) === String(fixture.id),
+      ) : [];
+      const byUser = new Map(fixturePredictions.map((prediction) => [String(prediction.user_id), prediction]));
+      const result = fixture.home_score === null || fixture.away_score === null
+        ? "" : `<b>Результат ${fixture.home_score}:${fixture.away_score}</b>`;
+      return `<article class="panel prediction-admin-card ${started ? "" : "predictions-locked"}">
+        <header class="prediction-admin-head"><div><small>Тур ${fixture.round} · ${new Date(fixture.kickoff).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</small><h4>${esc(fixture.home_name)} — ${esc(fixture.away_name)}</h4></div>
+          ${started ? `<span class="prediction-count ${fixturePredictions.length === participants.length && participants.length ? "complete" : ""}">${fixturePredictions.length} из ${participants.length}</span>` : `<span class="prediction-count locked-count">Скрыто</span>`}</header>
+        ${started ? `<div class="prediction-admin-grid">${participants.length ? participants.map((participant) => {
+          const prediction = byUser.get(String(participant.id));
+          const userFunctions = (state.functions || []).filter((item) =>
+            String(item.user_id) === String(participant.id)
+            && Number(item.round) === Number(fixture.round)
+            && (!item.fixture_id || String(item.fixture_id) === String(fixture.id)));
+          const tags = [
+            prediction?.bonus ? "×2" : "",
+            ...userFunctions.map((item) => seasonFunctions.find((entry) => entry.code === item.function_code)?.short || item.function_code),
+          ].filter(Boolean);
+          return `<div class="prediction-chip ${prediction ? "" : "missing"}"><span>${esc(participant.display_name)}${tags.length ? `<small class="admin-function-tags">${tags.map(esc).join(" · ")}</small>` : ""}</span>${prediction ? `<b>${prediction.home_score}:${prediction.away_score}</b>` : `<small>Нет прогноза</small>`}</div>`;
+        }).join("") : `<div class="empty">Участников пока нет.</div>`}</div>`
+          : `<div class="predictions-hidden">Прогнозы откроются после начала матча</div>`}
+        <footer class="prediction-admin-status"><span class="${started ? "closed" : "open"}">${started ? "Прогнозы открыты" : "Приём продолжается"}</span>${result}</footer>
+      </article>`;
+    }).join("") : `<section class="panel empty">В этом туре нет матчей.</section>`}</section>`;
 }
 
 function passwordView() {
