@@ -31,6 +31,10 @@ function cleanLogin(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function isCompetitionUser(user) {
+  return Boolean(user?.active) && user.role === "player" && cleanLogin(user.login) !== "test";
+}
+
 function score(value) {
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 && number <= 30 ? number : null;
@@ -262,8 +266,9 @@ app.get("/api/state", auth, async (req, res) => {
     query("SELECT * FROM fixtures ORDER BY round,kickoff"),
     query(`SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id
            JOIN fixtures f ON f.id=p.fixture_id
-           WHERE u.active=TRUE AND (p.user_id=$1 OR (f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED')))`, [req.user.id]),
-    query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE"),
+           WHERE p.user_id=$1 OR (u.active=TRUE AND u.role='player' AND LOWER(u.login)<>'test'
+             AND f.kickoff<=NOW() AND f.status NOT IN ('POSTPONED','CANCELLED'))`, [req.user.id]),
+    query("SELECT p.*,u.display_name FROM predictions p JOIN users u ON u.id=p.user_id WHERE u.active=TRUE AND u.role='player' AND LOWER(u.login)<>'test'"),
     query("SELECT id,login,display_name,role,active,must_change_password,last_login_at FROM users ORDER BY id"),
     query("SELECT * FROM league_settings WHERE id=1"),
     query("SELECT * FROM season_functions ORDER BY created_at"),
@@ -277,7 +282,8 @@ app.get("/api/state", auth, async (req, res) => {
     if (!item.rounds[key]) item.rounds[key] = { base: 0, bonus: 0, total: 0 };
     return item.rounds[key];
   };
-  users.rows.filter((user) => user.active).forEach((user) => {
+  const competitionUserIds = new Set(users.rows.filter(isCompetitionUser).map((user) => String(user.id)));
+  users.rows.filter(isCompetitionUser).forEach((user) => {
     if (!ranking.has(user.display_name)) ranking.set(user.display_name, createRankingItem(user.display_name));
   });
   for (const prediction of allPredictions.rows) {
@@ -298,6 +304,7 @@ app.get("/api/state", auth, async (req, res) => {
     }
   }
   for (const selection of functions.rows) {
+    if (!competitionUserIds.has(String(selection.user_id))) continue;
     const userPredictions = allPredictions.rows.filter((prediction) => String(prediction.user_id) === String(selection.user_id));
     const user = userPredictions[0]?.display_name
       || users.rows.find((item) => String(item.id) === String(selection.user_id))?.display_name;
@@ -339,7 +346,7 @@ app.get("/api/state", auth, async (req, res) => {
   const visibleFunctions = req.user.role === "admin" ? functions.rows : functions.rows.filter(
     (item) => String(item.user_id) === String(req.user.id) || startedRounds.has(Number(item.round)),
   );
-  const participants = users.rows.filter((item) => item.active).map(
+  const participants = users.rows.filter(isCompetitionUser).map(
     (item) => ({ id: item.id, display_name: item.display_name }),
   );
   const functionPotential = {};
@@ -581,7 +588,7 @@ app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
     query(`SELECT
       (SELECT COUNT(*) FROM fixtures)::int fixtures,
       (SELECT COUNT(*) FROM fixtures WHERE home_score IS NULL OR away_score IS NULL)::int pending_results,
-      (SELECT COUNT(*) FROM users WHERE role='player' AND active=TRUE)::int active_players,
+      (SELECT COUNT(*) FROM users WHERE role='player' AND active=TRUE AND LOWER(login)<>'test')::int active_players,
       (SELECT MAX(updated_at) FROM fixtures) last_sync`),
     query(`SELECT u.id,u.login,u.display_name,u.active,u.must_change_password,u.last_login_at,
       COUNT(p.fixture_id)::int predictions,
@@ -591,7 +598,7 @@ app.get("/api/admin/dashboard", auth, admin, async (_req, res) => {
       WHERE u.role='player' GROUP BY u.id ORDER BY u.display_name`),
     query(`SELECT p.fixture_id,p.user_id,p.home_score,p.away_score,p.bonus,p.updated_at,u.display_name
       FROM predictions p JOIN users u ON u.id=p.user_id
-      WHERE u.role='player' AND u.active=TRUE
+      WHERE u.role='player' AND u.active=TRUE AND LOWER(u.login)<>'test'
       ORDER BY p.fixture_id,u.display_name`),
     query("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100"),
     query("SELECT * FROM league_settings WHERE id=1"),
