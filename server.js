@@ -642,40 +642,93 @@ app.patch("/api/admin/settings", auth, admin, async (req, res) => {
 });
 
 app.post("/api/admin/sync", auth, admin, async (req, res) => {
-  const updated = await syncMatches();
-  await audit(req.user, "Синхронизированы матчи", "fixtures", null, { updated });
-  res.json({ ok: true, updated });
+  const report = await syncMatches();
+  await audit(req.user, "Синхронизированы матчи", "fixtures", null, report);
+  res.json({ ok: true, updated: report.processed, ...report });
 });
 
 app.post("/api/cron/sync", async (req, res) => {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.sendStatus(401);
-  const updated = await syncMatches();
-  res.json({ ok: true, updated });
+  const report = await syncMatches();
+  res.json({ ok: true, updated: report.processed, ...report });
 });
 
 async function syncMatches() {
   if (!process.env.FOOTBALL_DATA_API_KEY) throw new Error("FOOTBALL_DATA_API_KEY is not configured");
   const season = process.env.SEASON || "2026";
-  const response = await fetch(`https://api.football-data.org/v4/competitions/PL/matches?season=${season}`, {
-    headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY },
-  });
-  if (!response.ok) throw new Error(`Results provider returned ${response.status}`);
-  const data = await response.json();
-  let updated = 0;
-  for (const match of data.matches || []) {
-    const round = Number(String(match.matchday || "0").replace(/\D/g, ""));
+  const requestMatches = async (filters) => {
+    const response = await fetch(`https://api.football-data.org/v4/competitions/PL/matches?${new URLSearchParams({ season, ...filters })}`, {
+      headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY, "Cache-Control": "no-cache" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) {
+      const error = new Error(response.status === 429
+        ? "Лимит football-data.org исчерпан. Повторите обновление позже."
+        : `Источник результатов вернул HTTP ${response.status}`);
+      error.status = 502;
+      throw error;
+    }
+    const data = await response.json();
+    if (!Array.isArray(data.matches) || data.matches.length === 0) {
+      const error = new Error("Источник вернул пустой календарь. Сохранённые данные не изменены.");
+      error.status = 502;
+      throw error;
+    }
+    return data.matches;
+  };
+  const matches = new Map((await requestMatches({})).map((match) => [match.id, match]));
+  const now = Date.now();
+  const dateFrom = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
+  const dateTo = new Date(now + 86400000).toISOString().slice(0, 10);
+  const warnings = [];
+  // A separate recent window checks recent results without making a request per match.
+  try {
+    const recent = await requestMatches({ dateFrom, dateTo });
+    for (const match of recent) {
+      const previous = matches.get(match.id);
+      if (!previous) continue;
+      const previousFinished = previous.status === "FINISHED" && previous.score?.fullTime?.home != null && previous.score?.fullTime?.away != null;
+      const nextFinished = match.status === "FINISHED" && match.score?.fullTime?.home != null && match.score?.fullTime?.away != null;
+      if ((!previousFinished || nextFinished)
+        && (!previous.lastUpdated || !match.lastUpdated || new Date(match.lastUpdated) >= new Date(previous.lastUpdated))) {
+        matches.set(match.id, match);
+      }
+    }
+  } catch (error) {
+    warnings.push(`Дополнительная проверка последних матчей: ${error.message}`);
+  }
+  const before = await query("SELECT id,status,home_score,away_score FROM fixtures");
+  const existing = new Map(before.rows.map((fixture) => [String(fixture.id), fixture]));
+  let changed = 0;
+  let receivedResults = 0;
+  const pending = [];
+  for (const match of matches.values()) {
+    const round = Number(String(match.matchday || "0").replace(/\\D/g, ""));
+    const hasResult = match.status === "FINISHED" && Number.isInteger(match.score?.fullTime?.home) && Number.isInteger(match.score?.fullTime?.away);
+    const previous = existing.get(String(match.id));
+    const preserveResult = previous?.status === "FINISHED" && previous.home_score != null && previous.away_score != null && !hasResult;
+    const status = preserveResult ? previous.status : match.status;
+    const home = preserveResult ? previous.home_score : hasResult ? match.score.fullTime.home : null;
+    const away = preserveResult ? previous.away_score : hasResult ? match.score.fullTime.away : null;
+    if (hasResult && (!previous || previous.status !== status || previous.home_score !== home || previous.away_score !== away)) receivedResults += 1;
+    if (!previous || previous.status !== status || previous.home_score !== home || previous.away_score !== away) changed += 1;
+    const kickoff = new Date(match.utcDate).getTime();
+    if (kickoff <= now - 3 * 3600000 && kickoff >= now - 7 * 86400000
+      && !["FINISHED", "POSTPONED", "CANCELLED", "SUSPENDED"].includes(status)) {
+      pending.push(`${match.homeTeam.name} — ${match.awayTeam.name}`);
+    }
     await query(
       `INSERT INTO fixtures(id,round,kickoff,status,home_name,away_name,home_crest,away_crest,home_score,away_score)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT(id) DO UPDATE SET round=EXCLUDED.round,kickoff=EXCLUDED.kickoff,status=EXCLUDED.status,
        home_name=EXCLUDED.home_name,away_name=EXCLUDED.away_name,home_crest=EXCLUDED.home_crest,
        away_crest=EXCLUDED.away_crest,home_score=EXCLUDED.home_score,away_score=EXCLUDED.away_score,updated_at=NOW()`,
-      [match.id, round, match.utcDate, match.status, match.homeTeam.name, match.awayTeam.name,
-       match.homeTeam.crest, match.awayTeam.crest, match.score?.fullTime?.home ?? null, match.score?.fullTime?.away ?? null],
+      [match.id, round, match.utcDate, status, match.homeTeam.name, match.awayTeam.name,
+       match.homeTeam.crest, match.awayTeam.crest, home, away],
     );
-    updated += 1;
   }
-  return updated;
+  if (pending.length) warnings.push(`Источник пока не подтвердил завершение ${pending.length} матчей: ${pending.join("; ")}. На бесплатном тарифе результаты могут поступать с задержкой.`);
+  return { processed: matches.size, changed, receivedResults, pending, warnings };
 }
 
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
