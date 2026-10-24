@@ -204,7 +204,7 @@ function ranking() {
     Number(fixture.round) === round && fixture.home_score !== null && fixture.away_score !== null);
   return `<div class="ranking-head"><span>Участник</span><span>Тур ${round}</span><span>Всего</span></div>${state.ranking.map((item, index) => {
     const roundPoints = item.rounds?.[String(round)] || { base: 0, bonus: 0, total: 0 };
-    const breakdown = roundHasResults
+    const breakdown = roundHasResults && (roundPoints.base !== 0 || roundPoints.bonus !== 0)
       ? `<small>База ${formatPoints(roundPoints.base)}${roundPoints.bonus ? ` · функции ${roundPoints.bonus > 0 ? "+" : ""}${formatPoints(roundPoints.bonus)}` : ""}</small>`
       : "";
     return `<div class="rank"><span>${index + 1}. ${esc(item.name)}${breakdown}</span><b class="round-total">${formatPoints(roundPoints.total)}</b><b>${formatPoints(item.total)}</b></div>`;
@@ -433,7 +433,7 @@ function bind() {
     } catch (e) { alert(e.message); }
   });
   const sync = document.querySelector("#sync");
-  if (sync) sync.onclick = async () => { sync.disabled = true; try { const r = await api("/api/admin/sync", { method: "POST" }); alert(`Обновлено матчей: ${r.updated}`); adminData=null; await load(); } catch (e) { alert(e.message); } finally { sync.disabled = false; } };
+  if (sync) sync.onclick = async () => { sync.disabled = true; try { const r = await api("/api/admin/sync", { method: "POST" }); alert([`Проверено матчей: ${r.processed ?? r.updated}`, `Изменились статус или счёт: ${r.changed ?? "—"}`, `Новых или исправленных результатов: ${r.receivedResults ?? "—"}`, ...(r.warnings || [])].join("\n\n")); adminData=null; await load(); } catch (e) { alert(e.message); } finally { sync.disabled = false; } };
   document.querySelectorAll("[data-admin-tab]").forEach((button)=>button.onclick=()=>{adminTab=button.dataset.adminTab;render();});
   const newUser = document.querySelector("#new-user");
   if (newUser) newUser.onsubmit = async (event) => { event.preventDefault(); try { await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(newUser))) }); adminData=null; tab="admin";adminTab="users";await load(); } catch (e) { alert(e.message); } };
