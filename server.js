@@ -703,7 +703,7 @@ async function syncMatches() {
   let receivedResults = 0;
   const pending = [];
   for (const match of matches.values()) {
-    const round = Number(String(match.matchday || "0").replace(/\\D/g, ""));
+    const round = Number(String(match.matchday || "0").replace(/\D/g, ""));
     const hasResult = match.status === "FINISHED" && Number.isInteger(match.score?.fullTime?.home) && Number.isInteger(match.score?.fullTime?.away);
     const previous = existing.get(String(match.id));
     const preserveResult = previous?.status === "FINISHED" && previous.home_score != null && previous.away_score != null && !hasResult;
